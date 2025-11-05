@@ -1,0 +1,55 @@
+%% System Flowchart - Smart Apartment Management System
+flowchart TB
+  subgraph External
+    PM["Property Manager (Admin UI)"]
+    TEN["Tenant (Portal / Mobile)"]
+    MTR["Meter Devices (IoT)"]
+    PG["Payment Gateway (External)"]
+  end
+
+  subgraph Frontend
+    FE1["Admin Frontend (React)"]
+    FE2["Tenant Frontend (React)"]
+  end
+
+  subgraph Backend
+    API["API Layer (Express)"]
+    AUTH["Auth & JWT"]
+    BILLS["Billing Engine"]
+    METER["Meter Service"]
+    NOTIF["Notifications & Scheduler"]
+    ROUTES["Routes / Controllers"]
+  end
+
+  DB[("MySQL Database")]
+
+  PM -->|"Uses admin UI"| FE1
+  TEN -->|"Uses tenant UI / scans QR"| FE2
+
+  FE1 -->|"HTTP REST / Socket"| API
+  FE2 -->|"HTTP REST / QR scan"| API
+
+  MTR -->|"Push readings / Polling"| METER
+  MTR -->|"Device scan"| API
+
+  API --> AUTH
+  AUTH -->|"verify token"| API
+
+  API --> ROUTES
+  ROUTES -->|"tenant/apartment CRUD"| DB
+  ROUTES -->|"create/read bills"| BILLS
+  METER -->|"consumption updates"| BILLS
+  BILLS -->|"store bills/payments"| DB
+  BILLS -->|"call payment gateway"| PG
+  PG -->|"payment confirmation"| BILLS
+  NOTIF -->|"send emails/SMS/websocket"| FE1
+  NOTIF -->|"send emails/SMS/websocket"| FE2
+  NOTIF -->|"read/write scheduling data"| DB
+
+  style DB fill:#fff7db,stroke:#c68a00
+  style Backend fill:#f3f7ff,stroke:#4a6cf7
+  style Frontend fill:#e8fff1,stroke:#34a853
+  style External fill:#fff0f6,stroke:#c2185b
+
+%% Notes:
+%% - This flowchart focuses on high-level system modules and flows: UI -> API -> Controllers -> DB, with Meter Service and Billing Engine interacting and Notifications handling outbound messages.
