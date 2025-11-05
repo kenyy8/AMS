@@ -1,55 +1,74 @@
-%% System Flowchart - Smart Apartment Management System
-flowchart TB
-  subgraph External
-    PM["Property Manager (Admin UI)"]
-    TEN["Tenant (Portal / Mobile)"]
-    MTR["Meter Devices (IoT)"]
-    PG["Payment Gateway (External)"]
+%% System Flowchart - Smart Apartment Management System (clean layout)
+flowchart LR
+
+  %% External actors
+  subgraph EXT [External Actors]
+    direction TB
+    PM["Property Manager\n(Admin UI)"]
+    TEN["Tenant\n(Portal / Mobile)"]
+    MTR["Meter Devices\n(IoT)"]
+    PG["Payment Gateway\n(External)"]
   end
 
-  subgraph Frontend
-    FE1["Admin Frontend (React)"]
-    FE2["Tenant Frontend (React)"]
+  %% Frontends
+  subgraph FE [Frontend Apps]
+    direction TB
+    FE1["Admin Frontend\n(React)"]
+    FE2["Tenant Frontend\n(React)"]
   end
 
-  subgraph Backend
-    API["API Layer (Express)"]
-    AUTH["Auth & JWT"]
-    BILLS["Billing Engine"]
-    METER["Meter Service"]
-    NOTIF["Notifications & Scheduler"]
-    ROUTES["Routes / Controllers"]
+  %% Backend modules grouped
+  subgraph BE [Backend Services]
+    direction TB
+    API[["API Layer\n(Express)"]]
+    AUTH(("Auth\nJWT / Middleware"))
+    ROUTES["Routes & Controllers"]
+    subgraph BE_SIDE [Processing]
+      direction TB
+      METER["Meter Service\n(device ingestion)"]
+      BILLS["Billing Engine\n(bill calc & store)"]
+      NOTIF["Notifications\nScheduler & Sender"]
+    end
   end
 
-  DB[("MySQL Database")]
+  DB[("MySQL Database\n(tenants, apartments, bills, devices)")]
 
-  PM -->|"Uses admin UI"| FE1
-  TEN -->|"Uses tenant UI / scans QR"| FE2
+  %% Layout and flows
+  PM -->|"uses"| FE1
+  TEN -->|"uses / scans QR"| FE2
 
-  FE1 -->|"HTTP REST / Socket"| API
-  FE2 -->|"HTTP REST / QR scan"| API
+  FE1 -->|"REST / Socket"| API
+  FE2 -->|"REST / QR"| API
 
-  MTR -->|"Push readings / Polling"| METER
-  MTR -->|"Device scan"| API
-
-  API --> AUTH
-  AUTH -->|"verify token"| API
-
+  API -->|"authenticate"| AUTH
   API --> ROUTES
-  ROUTES -->|"tenant/apartment CRUD"| DB
+  ROUTES -->|"CRUD: tenants, apartments"| DB
+
+  MTR -.->|"reads/send"| METER
+  API -->|"device scan"| METER
+  METER -->|"consumption events"| BILLS
+
   ROUTES -->|"create/read bills"| BILLS
-  METER -->|"consumption updates"| BILLS
-  BILLS -->|"store bills/payments"| DB
-  BILLS -->|"call payment gateway"| PG
-  PG -->|"payment confirmation"| BILLS
-  NOTIF -->|"send emails/SMS/websocket"| FE1
-  NOTIF -->|"send emails/SMS/websocket"| FE2
-  NOTIF -->|"read/write scheduling data"| DB
+  BILLS -->|"persist bills/payments"| DB
+  BILLS -->|"request payment"| PG
+  PG -->|"payment result"| BILLS
 
-  style DB fill:#fff7db,stroke:#c68a00
-  style Backend fill:#f3f7ff,stroke:#4a6cf7
-  style Frontend fill:#e8fff1,stroke:#34a853
-  style External fill:#fff0f6,stroke:#c2185b
+  BILLS -->|"notify"| NOTIF
+  NOTIF -->|"email/sms/websocket"| FE1
+  NOTIF -->|"email/sms/websocket"| FE2
+  NOTIF -->|"read/write schedule"| DB
 
-%% Notes:
-%% - This flowchart focuses on high-level system modules and flows: UI -> API -> Controllers -> DB, with Meter Service and Billing Engine interacting and Notifications handling outbound messages.
+  %% Styling for a cleaner look
+  classDef actor fill:#fff0d9,stroke:#d08a00,stroke-width:1px
+  classDef frontend fill:#e6f7ff,stroke:#2b8cff,stroke-width:1px
+  classDef backend fill:#f6fff2,stroke:#34a853,stroke-width:1px
+  classDef db fill:#fff7f0,stroke:#c68a00,stroke-width:1px
+  class EXT actor
+  class FE frontend
+  class BE backend
+  class DB db
+
+  %% Make arrows straight and spaced
+  linkStyle default interpolate basis
+
+%% End of flowchart
