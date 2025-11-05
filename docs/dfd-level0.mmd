@@ -1,0 +1,12 @@
+%% DFD Level 0 - Smart Apartment Management System
+flowchart LR
+  PM["Property Manager"] -->|"Manage apartments, create bills, view reports"| SYS["Smart Apartment Management System"]
+  TEN["Tenant / Mobile"] -->|"View bills, login, pay, scan QR"| SYS
+  MTR["Meter Devices"] -->|"Send readings, status"| SYS
+  SYS -->|"Read/Write tenant/apartment/bill data"| DB[("MySQL Database")]
+  SYS -->|"Notifications / Reports"| PM
+  SYS -->|"Notifications / Receipts"| TEN
+  SYS -->|"Process payments"| PG[("Payment Gateway")]
+
+%% Notes:
+%% - DB represents tenants, apartments, bills, meter_devices, payments, qr_codes tables.

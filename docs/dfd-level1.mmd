@@ -1,0 +1,27 @@
+%% DFD Level 1 - Smart Apartment Management System (decomposed)
+flowchart LR
+  PM["Property Manager"] -->|"Login / Admin actions"| A["Auth & Authorization"]
+  TEN["Tenant"] -->|"Login / Tenant actions"| A
+  A -->|"auth token"| SYSCORE["Core API Layer"]
+
+  SYSCORE -->|"CRUD tenants/apartments"| T["Tenant & Apartment Management"]
+  SYSCORE -->|"meter read endpoints, create/update readings"| M["Meter Integration & Readings"]
+  M -->|"consumption data"| B["Billing Engine & Payment Processing"]
+  T -->|"tenant info / assignments"| B
+  B -->|"bill records"| DB[("MySQL Database")]
+  T -->|"tenant profile, QR"| DB
+  M -->|"device data"| DB
+  B -->|"payment request"| PG[("Payment Gateway")]
+  PG -->|"payment confirmation"| B
+  B -->|"billing summaries"| R["Notifications & Reporting"]
+  R -->|"notifications"| PM
+  R -->|"notifications"| TEN
+  R -->|"reports"| PM
+
+%% Notes:
+%% - Map:
+%%   Auth & Authorization -> backend/server.js (/api/.../login, middleware/auth.js)
+%%   Tenant & Apartment Management -> backend/controllers/tenantController.js, apartmentController.js
+%%   Meter Integration -> backend/controllers/meterDeviceController.js, routes/meterDeviceRoutes.js
+%%   Billing Engine -> /api/bills endpoints in backend/server.js
+%%   Notifications & Reporting -> backend/services/notifications.js, /api/reports/*
