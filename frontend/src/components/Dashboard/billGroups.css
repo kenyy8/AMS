@@ -1,0 +1,26 @@
+/* Visual styles for bill groups */
+.bill-group-card {
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.bill-group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.bill-group-icon { font-size: 18px; }
+.bill-group-electricity { background-color: #fff9e6; }
+.bill-group-water { background-color: #e9f6ff; }
+.bill-group-rent { background-color: #edfcea; }
+.bill-row-icon { margin-right: 8px; }
+.bill-row { padding: 8px 12px; }
+.view-more-btn { float: right; }
+.status-badge { padding: 6px 8px; border-radius: 12px; font-weight:600; }
+.status-badge.pending { background:#6c757d; color:#fff; }
+.status-badge.paid { background:#198754; color:#fff; }
+.status-badge.overdue { background:#dc3545; color:#fff; }
+/* subtle divider between groups */
+.group-divider { height:1px; background: rgba(0,0,0,0.06); margin:12px 0; }

@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Project Flowchart - Mermaid</title>
+  <script src="assets/mermaid.min.js"></script>
+    <script>
+      // Configure Mermaid
+      mermaid.initialize({
+        startOnLoad: true,
+        theme: "default",
+        securityLevel: "loose",
+      });
+    </script>
+    <style>
+      body { font-family: Arial, Helvetica, sans-serif; margin: 16px; }
+      .note { color: #555; margin-bottom: 12px; }
+    </style>
+  </head>
+  <body>
+  <h1>Meter-Enabled Smart ID Apartment Management System - Flowchart</h1>
+  <h1>Meter-Enabled Smart ID Apartment Management System - Flowchart</h1>
+      This page renders the Mermaid diagram from <code>docs/flowchart.mmd</code>.
+      If you edit the .mmd file, reload this page to see updates.
+    </p>
+
+    <!-- Mermaid container -->
+    <div class="mermaid" id="flowchart"></div>
+
+    <!-- Actual flowchart text in a script block -->
+    <script type="text/template" id="flowchart-src">
+  %% Flowchart for Meter-Enabled Smart ID Apartment Management System
+      %% Fixed version for Mermaid 10.9.4 compatibility
+
+      flowchart LR
+        subgraph Frontend
+          F1[React App - Property Manager & Tenant UIs]
+          F2[Axios / API Client]
+          F3[QR Scanner / Mobile]
+        end
+
+        subgraph Backend
+          B1[Express Server - backend/server.js]
+          B2[REST API endpoints: /api/tenants, /api/apartments, /api/bills, /api/meter-devices, /api/qr-codes]
+          B3[Controllers & Services]
+          B4[Scheduler / scripts - scripts/check_devices.js]
+        end
+
+        subgraph DB[MySQL Database]
+          D1[apartments table]
+          D2[tenants table]
+          D3[bills table]
+          D4[meter_devices table]
+          D5[property_managers, payments, qr_codes...]
+        end
+
+  subgraph Meter[Meter Devices & Gateways]
+          I1[Smart Meters / Devices]
+          I2[Gateway Services - backend/services/meterGateway.js]
+        end
+
+        F1 -->|calls| F2
+        F2 -->|HTTP| B1
+        F3 -->|scans QR / POST QR| B1
+
+        B1 -->|queries/inserts| DB
+        B3 -->|updates| D3
+        B1 -->|uses| B3
+        B1 -->|uses scheduler| B4
+
+        I1 -->|sends readings| I2
+        I2 -->|forwards readings via API| B1
+        B1 -->|stores device state| D4
+        B1 -->|generates QR tokens| D5
+
+        DB -->|referenced by| B3
+    </script>
+
+    <script>
+      // Inject the text into the mermaid div manually
+      document.getElementById("flowchart").textContent =
+        document.getElementById("flowchart-src").textContent;
+      mermaid.init(undefined, document.querySelectorAll(".mermaid"));
+    </script>
+
+    <p id="mermaid-note" style="color:#a00; display:none;">
+      Mermaid runtime not available. To enable rendering, place a compatible
+      mermaid.min.js in <code>docs/assets/mermaid.min.js</code> and reload the page.
+    </p>
+    <script>
+      if (typeof mermaid === 'undefined') {
+        document.getElementById('mermaid-note').style.display = 'block';
+      }
+    </script>
+  </body>
+</html>

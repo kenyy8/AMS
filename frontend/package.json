@@ -7,6 +7,9 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
+    "@yudiel/react-qr-scanner": "^2.3.1",
+  "chart.js": "^4.4.0",
+  "react-chartjs-2": "^5.2.0",
     "axios": "^1.9.0",
     "bootstrap": "^5.3.6",
     "html2canvas": "^1.4.1",
@@ -16,13 +19,22 @@
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.0",
     "react-scripts": "5.0.1",
+  "jsqr": "^1.4.0",
+  "socket.io-client": "^4.8.1",
+  "qrcode": "^1.5.1",
     "web-vitals": "^2.1.4"
   },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "cross-env": "^7.0.3"
+  },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject"
+  "start": "react-scripts start --no-source-maps",
+  "build": "react-scripts build",
+  "test": "react-scripts test",
+  "eject": "react-scripts eject",
+  "fix-qr-sourcemaps": "node ./scripts/fix-qr-sourcemaps.js",
+  "postinstall": "node ./scripts/fix-qr-sourcemaps.js || true"
   },
   "eslintConfig": {
     "extends": [

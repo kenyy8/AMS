@@ -1,32 +1,22 @@
-import axios from 'axios';
+﻿import axios from "axios";
 
-const instance = axios.create();
+const instance = axios.create({
+  baseURL: process.env.REACT_APP_API_URL || "http://localhost:5001"
+});
 
 instance.interceptors.response.use(
   response => response,
   error => {
+    const path = window.location.pathname || '';
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-      localStorage.removeItem('token');
-      // Redirect to the correct login page based on current path or role
-      if (window.location.pathname.startsWith('/student')) {
-        window.location.href = '/student-login';
+      if (path.includes('tenant')) {
+        window.location.href = '/tenant-login';
       } else {
-        window.location.href = '/admin-login';
+        window.location.href = '/property-manager-login';
       }
     }
     return Promise.reject(error);
   }
 );
 
-instance.interceptors.request.use(
-  config => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-  },
-  error => Promise.reject(error)
-);
-
-export default instance; 
+export default instance;

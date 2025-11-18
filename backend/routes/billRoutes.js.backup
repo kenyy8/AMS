@@ -1,0 +1,38 @@
+﻿const express = require('express');
+const router = express.Router();
+const BillController = require('../controllers/billController');
+
+// Create a new bill
+router.post('/', BillController.create);
+
+// Get all bills
+router.get('/', BillController.getAll);
+
+// Get bills by tenant ID
+router.get('/tenant/:tenant_id', BillController.getByTenantId);
+
+// Get pending bills
+router.get('/pending', BillController.getPending);
+
+// Get overdue bills
+router.get('/overdue', BillController.getOverdue);
+
+// Update bill status
+router.put('/:id', BillController.updateStatus);
+
+// Delete a bill
+router.delete('/:id', BillController.delete);
+
+// Create rent bill
+router.post('/rent', BillController.createRentBill);
+
+// Create water bill
+router.post('/water', BillController.createWaterBill);
+
+// Create electricity bill
+router.post('/electricity', BillController.createElectricityBill);
+
+// Get monthly bills
+router.get('/monthly/:tenant_id/:month/:year', BillController.getMonthlyBills);
+
+module.exports = router;

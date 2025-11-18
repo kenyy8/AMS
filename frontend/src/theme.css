@@ -1,0 +1,378 @@
+:root{
+	--header-bg: rgba(255,255,255,0.92);
+	--header-border: rgba(15,23,42,0.06);
+	--brand-color: #0f172a;
+	--app-header-height: 64px;
+	--card-bg: #ffffff;
+	--card-radius: 10px;
+	--card-shadow: 0 8px 24px rgba(2,6,23,0.06);
+	--content-bg: #f6f7f9;
+
+	/* Hero palette */
+	--hero-grad-1: #3b82f6; /* blue */
+	--hero-grad-2: #06b6d4; /* teal */
+	--hero-grad-3: #34d399; /* green */
+	--hero-overlay: rgba(7,10,23,0.12);
+}
+
+/* Header surface */
+.header-surface{
+	background: var(--header-bg);
+	border-bottom: 1px solid var(--header-border);
+	backdrop-filter: blur(6px);
+}
+
+.navbar-custom .navbar-brand.navbar-center-brand{
+	font-weight:700;
+	color:var(--brand-color);
+	letter-spacing:0.02em;
+}
+
+.navbar-custom .nav-link{
+	color: rgba(15,23,42,0.75);
+	margin-left: 0.6rem;
+	margin-right: 0.6rem;
+}
+
+.navbar-small{ padding: .55rem 0; }
+
+.app-container{ width:100%; max-width:none; margin:0 auto; padding:0 18px; box-sizing:border-box; }
+
+/* Ensure full-height layout so we can keep the header fixed and content scrollable beneath it */
+html, body, #root{ height:100%; margin:0; padding:0; }
+/* prevent double viewport scroll; make the main content area scrollable instead */
+body{ overflow:hidden; }
+
+/* Global full-window background image layer (visual only) */
+/* Image source is provided via JS in `App.js` as the CSS var --ams-bg */
+body::before{
+	content: "";
+	position: fixed;
+	inset: 0;
+	background-image: var(--ams-bg);
+	background-repeat: no-repeat;
+	background-size: cover;
+	background-position: center center;
+	z-index: -9999; /* always behind app content */
+		opacity: 0; /* hidden by default */
+	pointer-events: none;
+	transition: opacity 220ms ease;
+}
+/* Only show the AMS background on selected pages */
+body.show-ams-bg::before{ opacity: 1; }
+
+/* Default app background for other pages: subtle blue gradient */
+body{ background: linear-gradient(180deg, #e6f0ff 0%, #f8fbff 100%); }
+
+/* Reduce background opacity automatically on authentication pages */
+body.auth-page::before{ opacity: 0.5; }
+
+/* Ensure the background doesn't create white margins on resize */
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+
+/* Override older hero/gradient backgrounds so the global image shows through */
+.hero-center{ background: transparent !important; }
+.hero-center::after{ display: none !important; }
+
+/* Make the hero title readable on top of the background */
+.hero-center .card-glass h1{ color: #0f172a !important; text-align:center; }
+
+/* Improve hero centering used on Home */
+.hero-center { 
+	display:flex; 
+	align-items:center; 
+	justify-content:center; 
+	min-height:68vh; 
+	padding:56px 20px 72px; 
+	background: linear-gradient(110deg, var(--hero-grad-1) 0%, var(--hero-grad-2) 52%, var(--hero-grad-3) 100%);
+	color: #fff;
+	position:relative;
+	overflow:hidden;
+}
+
+.hero-center::after{
+	content: "";
+	position:absolute;
+	left:0; right:0; top:0; bottom:0;
+	background: radial-gradient(800px 300px at 85% 10%, rgba(255,255,255,0.06), transparent 30%), linear-gradient(180deg, var(--hero-overlay), transparent 40%);
+	pointer-events:none;
+}
+
+/* Container narrow */
+.container-narrow{ width:100%; max-width:1200px; margin:0 auto; position:relative; padding:0 12px; box-sizing:border-box; }
+
+/* Glass card used on Home */
+.card-glass{ background: rgba(255,255,255,0.96); border-radius:14px; box-shadow: 0 20px 40px rgba(2,6,23,0.18); }
+
+/* Hero inner title styles */
+.hero-center .card-glass h1{ color:#0f172a; font-weight:700; margin-bottom:6px; }
+.hero-center .card-glass p{ color: #4b5563; margin-bottom:18px; }
+
+/* Two-column cards row */
+.card-row{ display:grid; grid-template-columns: repeat(2, 1fr); gap:26px; align-items:stretch; width:100%; }
+.card-glass { position: relative; overflow: visible; }
+.card-top-bar{ height:18px; border-top-left-radius:14px; border-top-right-radius:14px; position:absolute; left:0; right:0; top:-18px; box-shadow: 0 6px 18px rgba(2,6,23,0.06); }
+.card-glass.left .card-top-bar{ background: linear-gradient(90deg,#8b5cf6,#a78bfa); }
+.card-glass.right .card-top-bar{ background: linear-gradient(90deg,#34d399,#86efac); }
+.card-inner{ padding:18px; }
+.card-glass .card-content{ padding:26px 24px 28px; text-align:center; }
+.card-left-icon{ position:absolute; left:20px; top:34px; font-size:46px; opacity:0.96; }
+.card-right-illustration{ position:absolute; right:20px; top:18px; font-size:56px; transform:translateY(0); }
+.card-glass .card-icon{ font-size:36px; margin-bottom:8px; }
+.card-glass h3{ margin:0 0 6px; font-size:20px; color:#0f172a; }
+.card-glass .muted{ color:#6b7280; margin-bottom:14px; }
+
+/* Buttons */
+.btn{ padding:12px 22px; border-radius:10px; font-weight:700; cursor:pointer; border:0; box-shadow: 0 8px 20px rgba(2,6,23,0.12); }
+.btn-primary{ background: linear-gradient(90deg,#7c3aed,#06b6d4); color:#fff; }
+.btn-success{ background: linear-gradient(90deg,#10b981,#059669); color:#fff; }
+.btn:active{ transform:translateY(1px); }
+
+/* Features row */
+.features-row{ margin-top:22px; display:grid; grid-template-columns: repeat(4,1fr); gap:12px; color:#475569; font-size:13px; text-align:center; align-items:start; }
+.feature-pill{ background:transparent; padding:6px 8px; }
+.feature-circle{ width:88px; height:88px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:6px solid rgba(255,255,255,0.28); margin:0 auto; background:transparent; box-shadow: 0 8px 28px rgba(2,6,23,0.12); }
+.feature-label{ margin-top:10px; font-size:13px; color:#ffffff; }
+.feature-pill .icon{ font-size:28px; display:block; }
+
+/* Footer */
+.site-footer{ margin-top:28px; background:transparent; color: rgba(255,255,255,0.88); padding:18px 12px; border-radius:8px; text-align:center; }
+
+/* Manager dashboard specific styles */
+.mgr-dashboard {
+	display:block; /* force single-column centered layout */
+}
+
+/* left nav (removed: sidebar moved to top/persistent header) */
+
+/* main content area */
+.mgr-main { flex:1; padding:20px 28px; background:#f6f7f9; }
+.mgr-topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.mgr-topbar h1{ margin:0; font-size:18px; color:#0f172a; font-weight:700; }
+
+/* top compact navigation that replaces the sidebar */
+.mgr-topnav-wrap{ display:flex; justify-content:center; position:fixed; left:0; right:0; top:8px; z-index:999; padding-top:8px; pointer-events:none; }
+.mgr-topnav{ display:flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; background:#fff; border-radius:12px; box-shadow: 0 10px 30px rgba(2,6,23,0.08); border:1px solid rgba(15,23,42,0.06); pointer-events:auto; }
+.mgr-topnav .brand{ font-weight:700; color:var(--brand-color); font-size:14px; margin-right:8px; }
+.mgr-topnav-items{ display:flex; gap:6px; align-items:center; }
+
+/* small label next to icons for clarity on larger screens */
+.topnav-item .label { display:none; margin-left:6px; font-size:13px; }
+.topnav-item:hover .label, .topnav-item.active .label { display:inline-block; }
+.topnav-item{ display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:8px; background:transparent; border:none; cursor:pointer; color:#374151; transition: background 120ms, transform 80ms; }
+.topnav-item svg{ opacity:0.95; }
+.topnav-item:hover, .topnav-item:focus{ background:rgba(15,23,42,0.03); outline:none; }
+.topnav-item.active{ background:linear-gradient(90deg, rgba(99,102,241,0.12), rgba(99,102,241,0.04)); color: #4f46e5; box-shadow: 0 2px 8px rgba(79,70,229,0.08); transform: translateY(-1px); }
+.sr-only{ position:absolute; left:-10000px; top:auto; width:1px; height:1px; overflow:hidden; }
+
+/* avoid overlap between sticky topnav and main content */
+.mgr-main { width:100%; max-width:none; margin:0 auto; padding:20px 32px 48px; background:var(--content-bg); min-height: calc(100vh - var(--app-header-height)); box-sizing:border-box; position:relative; }
+
+/* Create a scrollable content wrapper so the viewport scrollbar won't overlap the header */
+.app-content-scroll{ position:fixed; top:var(--app-header-height); left:0; right:0; bottom:0; overflow:auto; -webkit-overflow-scrolling:touch; }
+
+.app-header{ width:100%; background: linear-gradient(180deg,#2d3748,#111827); color:#fff; height:var(--app-header-height); padding:0; position:fixed; top:0; left:0; right:0; z-index:1200; box-shadow: 0 8px 28px rgba(2,6,23,0.32); display:flex; align-items:center; }
+.app-header-inner{ width:100%; max-width:none; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:0 18px; height:100%; }
+.brand-left{ display:flex; align-items:center; gap:10px; }
+.brand-mark{ width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.28); }
+.brand-text{ font-weight:800; color:#e6eefc; letter-spacing:0.04em; font-size:14px; text-transform:uppercase; }
+.header-actions{ display:flex; align-items:center; gap:10px; }
+.btn-ghost{ background:transparent; color:rgba(255,255,255,0.9); border:0; padding:8px 10px; border-radius:8px; }
+
+.center-nav-wrap{ display:none; /* center nav moved to top header; keep rules for reference */ }
+.center-nav{ display:none; }
+.center-nav .center-nav-item{ background:#fff; border-radius:12px; padding:12px 18px; border:1px solid rgba(15,23,42,0.06); box-shadow: 0 6px 18px rgba(2,6,23,0.04); display:flex; gap:10px; align-items:center; color:#374151; cursor:pointer; }
+.center-nav .center-nav-item svg{ opacity:0.9 }
+.center-nav .center-nav-label{ margin-left:6px; font-weight:600; color:#475569; }
+.center-nav .center-nav-item.active{ color:#0f172a; box-shadow:none; border-color:transparent; position:relative; }
+.center-nav .center-nav-item.active::after{ content:''; position:absolute; left:12px; right:12px; bottom:-12px; height:4px; border-radius:4px; background:linear-gradient(90deg,#4f46e5,#06b6d4); }
+
+/* stat tiles */
+.mgr-stats{ display:flex; gap:14px; margin-bottom:14px; }
+.stat-tile{ flex:1; background:#fff; border-radius:6px; padding:14px 16px; box-shadow: 0 6px 18px rgba(2,6,23,0.03); border:1px solid rgba(15,23,42,0.04); }
+.stat-tile .num{ font-weight:700; font-size:18px; color:#111827; }
+.stat-tile .label{ color:#6b7280; font-size:13px; margin-top:6px; }
+.stat-tile .chip{ display:inline-block; padding:8px 12px; border-radius:6px; font-weight:700; color:#fff; }
+.chip.overdue{ background:#ef4444; }
+.chip.outstanding{ background:#10b981; }
+
+/* panels */
+.panel{ background:#fff; border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.03); border:1px solid rgba(15,23,42,0.04); margin-bottom:16px; }
+.panel .panel-header{ padding:10px 14px; border-bottom:1px solid rgba(15,23,42,0.04); display:flex; justify-content:space-between; align-items:center; }
+.panel .panel-header h5{ margin:0; font-size:15px; font-weight:700; }
+.panel .panel-body{ padding:12px 14px; }
+
+/* table tweaks */
+.panel table.table{ margin-bottom:0; }
+.panel table.table thead th{ font-weight:700; font-size:13px; color:#111827; border-bottom:1px solid rgba(15,23,42,0.06); }
+.panel table.table tbody td{ vertical-align:middle; }
+
+/* prevent tables and cards from shrinking too small on narrow viewports */
+.panel { min-width: 280px; }
+.panel .table-responsive{ overflow:auto; }
+.panel table.table { min-width: 520px; }
+.card { min-width: 260px; }
+
+@media (max-width: 720px){
+	.panel table.table { min-width: 100%; }
+	.panel .table-responsive { overflow-x: auto; }
+}
+
+/* badges */
+.badge-type{ background:#60a5fa; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px; }
+.badge-status.online{ background:#10b981; }
+.badge-status.offline{ background:#ef4444; }
+
+/* utility status badges (consistent look) */
+.status-badge{ display:inline-block; padding:6px 10px; border-radius:8px; color:#fff; font-weight:700; font-size:12px; }
+.status-badge.active{ background: #10b981; }
+.status-badge.offline{ background: #ef4444; }
+.status-badge.unknown{ background: #6b7280; }
+
+/* ensure tables inside fluid containers don't overflow awkwardly */
+.table-responsive{ overflow-x:auto; }
+
+/* quick actions */
+.quick-actions .btn{ border-radius:8px; box-shadow:none; font-weight:700; }
+
+/* header quick actions (compact toolbar inside dark header) */
+.quick-actions-header{ display:flex; gap:8px; align-items:center; }
+.quick-actions-header .qa-btn{ display:inline-flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.06); border-radius:8px; cursor:pointer; font-weight:700; transition: background 140ms, transform 80ms; }
+.quick-actions-header .qa-btn svg{ opacity:0.95; }
+.quick-actions-header .qa-btn .qa-label{ display:none; font-weight:700; color:rgba(255,255,255,0.95); }
+.quick-actions-header .qa-btn:hover{ background:rgba(255,255,255,0.12); transform:translateY(-1px); }
+.quick-actions-header .qa-btn.active{ background:linear-gradient(90deg, rgba(79,70,229,0.18), rgba(6,182,212,0.12)); box-shadow: 0 6px 18px rgba(2,6,23,0.12); color:#fff; }
+
+@media (min-width: 900px){
+	.quick-actions-header .qa-btn .qa-label{ display:inline-block; }
+}
+
+/* footer thin */
+.mgr-footer{ margin-top:24px; background:#fff; padding:10px 12px; border-radius:8px; text-align:center; color:#6b7280; border:1px solid rgba(15,23,42,0.03); }
+
+/* reports grid */
+.reports-root .small-controls .form-control-sm, .reports-root .form-select-sm{ min-width:140px; }
+/* Centered 2x2 grid for reports on larger screens */
+.reports-grid{ display:grid; grid-template-columns: repeat(2, 1fr); gap:22px; align-items:stretch; justify-content:stretch; width:100%; max-width:1600px; margin:0 auto; padding:0 18px; box-sizing:border-box; }
+.report-card{ background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.78)); border-radius:14px; border: 1px solid rgba(255,255,255,0.6); backdrop-filter: blur(6px); overflow:visible; }
+.report-card .card-body{ padding:18px; }
+.report-card.summary{ min-width:300px; }
+.report-card.small-chart .card-body{ padding:18px; }
+.report-card h4, .report-card .h4{ font-size:1.6rem; }
+
+.report-card .text-muted.small{ color: rgba(15,23,42,0.5); }
+
+@media (max-width:720px){
+	.reports-grid{ grid-template-columns: 1fr; }
+}
+
+/* ensure charts are visible without internal scroll */
+.report-chart{ height:420px; display:flex; align-items:center; justify-content:center; }
+.report-card.type-breakdown .report-chart{ height:480px; }
+.reports-root .card, .report-card{ overflow:visible; }
+
+@media (max-width:1000px){
+ 	.reports-grid{ grid-template-columns: 1fr; }
+ 	.report-chart{ height:260px; }
+ 	.report-card.type-breakdown .report-chart{ height:300px; }
+}
+
+/* center cards on very large screens */
+@media (min-width: 1200px){
+  .reports-grid{ max-width:1200px; }
+  .report-card{ border-radius:16px; }
+}
+
+/* interactive card and modal */
+.report-card[role="button"]{ cursor:pointer; transition: transform 140ms ease, box-shadow 140ms ease; }
+.report-card[role="button"]:hover{ transform: translateY(-6px); box-shadow: 0 20px 40px rgba(2,6,23,0.08); }
+
+.overlay-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:1200; }
+.overlay-backdrop{ position:absolute; inset:0; background: rgba(2,6,23,0.48); }
+.overlay-panel{ position:relative; width:92%; max-width:1400px; background: #fff; border-radius:12px; padding:18px; z-index:1210; box-shadow:0 30px 80px rgba(2,6,23,0.2); overflow:hidden; }
+.overlay-panel .btn{ min-width:80px; }
+
+@media (max-width: 992px){
+	.mgr-main{ padding:12px; }
+	.mgr-stats{ flex-direction:column; }
+}
+
+/* adjust hero title color for white on gradient */
+.hero-center .card-glass h1{ color:#ffffff; }
+.hero-center .card-glass p{ color: rgba(255,255,255,0.95); }
+
+/* Small screens */
+@media (max-width: 720px){
+	.card-row{ grid-template-columns: 1fr; }
+	.features-row{ grid-template-columns: repeat(2,1fr); }
+	.hero-center{ min-height: auto; padding: 28px 12px; }
+}
+
+/* Buttons */
+.btn-primary-custom{ background: linear-gradient(180deg,#06b6d4,#0891b2); color:#fff; border:0; }
+
+/* NOTE: navbar visibility intentionally left to app logic; do not force hide here */
+
+/* --- Custom header pill nav (screenshot match) --- */
+.navbar-gradient{ background: linear-gradient(180deg,#0f1724,#0b1220); }
+.app-header { padding:12px 0; }
+.brand-mark{ width:34px; height:34px; background:linear-gradient(135deg,#06b6d4,#7c3aed); border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.32); }
+.brand-text{ color:#e6eefc; font-weight:800; letter-spacing:0.02em; }
+
+.nav-center{ gap:10px; }
+.nav-pill{ display:inline-block; padding:10px 16px; border-radius:10px; background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.85); text-decoration:none; font-weight:700; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.06); transition: all 160ms ease; border: 1px solid rgba(255,255,255,0.03); }
+.nav-pill:hover{ transform: translateY(-2px); background: rgba(255,255,255,0.06); }
+.nav-pill.active{ background: linear-gradient(90deg, rgba(79,70,229,0.18), rgba(6,182,212,0.06)); color:#fff; box-shadow: 0 6px 18px rgba(2,6,23,0.22); border-color: rgba(79,70,229,0.12); }
+
+.nav-right .nav-utility{ background:transparent; border:0; color: rgba(255,255,255,0.88); padding:8px 10px; border-radius:8px; cursor:pointer; }
+.nav-right .nav-utility:hover{ background: rgba(255,255,255,0.04); transform: translateY(-1px); }
+
+/* subtle bottom shadow edge like screenshot */
+.app-header { box-shadow: 0 8px 28px rgba(2,6,23,0.32); }
+
+@media (max-width: 900px){
+	.nav-center{ display:none !important; }
+	.nav-right{ display:none !important; }
+}
+
+/* ==========================
+	 Unified visual system
+	 - consistent card, panel, button, and typography styles
+	 - ensures Dashboard, Bills, Tenants, Apartments, Meter pages match
+	 ========================== */
+
+/* Card / Panel base */
+.card-base, .panel, .report-card, .stat-tile{ background: var(--card-bg); border-radius: var(--card-radius); box-shadow: var(--card-shadow); border: 1px solid rgba(15,23,42,0.04); }
+.panel{ border-radius: var(--card-radius); box-shadow: var(--card-shadow); }
+.panel .panel-header{ padding:16px; border-bottom:1px solid rgba(15,23,42,0.05); }
+.panel .panel-body{ padding:18px; }
+
+/* make tables consistent inside cards */
+.panel table.table thead th{ font-weight:700; color:#111827; }
+.panel table.table tbody td{ padding:12px 10px; }
+
+/* Card spacing/layout */
+.card-row, .reports-grid{ gap:20px; }
+.panel{ margin-bottom:22px; }
+
+/* Buttons consistent */
+.btn, .btn-primary, .btn-success{ border-radius:8px; font-weight:700; }
+.btn-secondary, .btn-outline-secondary, .btn-sm{ border-radius:8px; }
+
+/* Typography adjustments */
+h1, .mgr-topbar h1{ font-weight:700; color:#0f172a; }
+body, input, select, textarea{ font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color:#111827; }
+
+/* Ensure consistent margins inside main content */
+.mgr-main .panel, .mgr-main .stat-tile { margin-left:0; margin-right:0; }
+
+/* Responsive tweaks: ensure cards stack nicely on small screens */
+@media (max-width: 900px){
+	.card-row, .reports-grid{ grid-template-columns: 1fr; }
+	.app-header-inner{ padding:0 12px; }
+	.app-container{ padding:0 12px; }
+}
+
+/* Utility: put main content under header; app components should wrap content in .app-content-scroll */
+.app-root-full{ min-height:100%; display:flex; flex-direction:column; }
+
