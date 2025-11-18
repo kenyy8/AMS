@@ -404,25 +404,8 @@ const MeterDeviceManagement = () => {
 
       {error && <div className="alert alert-danger mb-3">{error}</div>}
 
-      {/* Top toolbar: title (left), rates (center), create (right) */}
-      <div className="d-flex align-items-center justify-content-between mb-3">
-        <div>
-          <h3 className="m-0">Devices</h3>
-        </div>
-        <div className="text-center">
-          <div style={{fontSize:14}}>Electricity (₱ / kWh): <strong>{Number(electricityRate || 0).toFixed(2)}</strong></div>
-          <div style={{fontSize:14}}>Water (₱ / m³): <strong>{Number(waterRate || 0).toFixed(2)}</strong></div>
-          <div style={{marginTop:6}}>
-            <button className="btn btn-sm btn-outline-primary" onClick={() => setShowRatesModal(true)}>Edit Rates</button>
-          </div>
-        </div>
-        <div>
-          <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>Create Device</button>
-        </div>
-      </div>
-
       {/* Search bar */}
-      <div className="mb-3">
+      <div className="mb-3 mdm-search">
         <div className="input-group">
           <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="form-control" placeholder="Search tenant, apartment, device type or id" />
           <button className="btn btn-outline-secondary" onClick={() => { setSearchTerm(''); }}>Clear</button>
@@ -430,7 +413,19 @@ const MeterDeviceManagement = () => {
       </div>
 
       <div className="card">
-        <div className="card-header">Devices</div>
+        <div className="card-header mdm-card-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <h6 className="m-0" style={{ marginRight: 8 }}>Devices</h6>
+          </div>
+          <div className="mdm-center">
+            <span className="mdm-rate-small">Electricity (₱ / kWh): <strong>{Number(electricityRate || 0).toFixed(2)}</strong></span>
+            <span style={{ marginLeft: 12 }} className="mdm-rate-small">Water (₱ / m³): <strong>{Number(waterRate || 0).toFixed(2)}</strong></span>
+            <button className="btn btn-sm btn-outline-primary" style={{ marginLeft: 10 }} onClick={() => setShowRatesModal(true)}>Edit Rates</button>
+          </div>
+          <div>
+            <button className="btn btn-primary mdm-create-btn" onClick={() => setShowCreateModal(true)}>Create Device</button>
+          </div>
+        </div>
         <div className="card-body">
           {devices.length === 0 ? (
             <p className="text-muted">No devices found</p>

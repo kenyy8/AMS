@@ -1,0 +1,67 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Build outputs
+/build/
+/dist/
+/frontend/build/
+
+# Logs
+*.log
+logs/
+server_run.log
+server_smoke.log
+smoke_results.log
+frontend.log
+backend.log
+
+# Environment files
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Generated/test artifacts
+*_result.json
+*_resp.json
+bills_after_*.json
+
+# Misc
+/dist/
+coverage/
+
+# Ignore frontend dependency folder if present
+frontend/node_modules/
+
+# Ignore backend node modules
+backend/node_modules/
+
+# Ignore compiled assets
+public/
+
+# Keep this file tracked
+!/.gitignore
