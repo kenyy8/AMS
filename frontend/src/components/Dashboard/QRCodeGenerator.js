@@ -218,7 +218,8 @@ const QRCodeGenerator = () => {
                           </div>
                         </div>
                       </div>
-                      <div className="mt-auto text-end small text-muted">ID: {t.id || t.tenant_id || '-'}</div>
+                            {/* Do not display numeric DB primary keys in UI per requirements */}
+                            <div className="mt-auto text-end small text-muted">&nbsp;</div>
                     </div>
                   </div>
                 </div>
@@ -255,16 +256,16 @@ const QRCodeGenerator = () => {
 
       {viewModal && viewModalData && (
         <div className="qr-modal-overlay" onClick={(e) => { if (e.target.classList.contains('qr-modal-overlay')) { setViewModal(false); } }}>
-          <div className="qr-modal" role="dialog" aria-modal="true">
-            <div className="qr-modal-body text-center">
-              <h5>Tenant QR</h5>
-              <div className="my-3">
-                <img src={viewModalData.qr_url} alt="Tenant QR" style={{maxWidth:320}} />
-              </div>
+          {/* Floating large QR image centered in overlay */}
+          <div className="view-qr-floating" role="dialog" aria-modal="true">
+            <div className="view-qr-image-wrap" onClick={(e)=>e.stopPropagation()}>
+              <img src={viewModalData.qr_url} alt="Tenant QR" className="view-qr-image" />
+            </div>
+            <div className="qr-info-box" onClick={(e)=>e.stopPropagation()}>
               <div><strong>{viewModalData.tenant?.tenant_name || viewModalData.tenant?.name || '-'}</strong></div>
               <div className="text-muted">{viewModalData.tenant?.apartment || viewModalData.tenant?.apartment_number || '-'}</div>
-              <div className="text-muted small">ID: {viewModalData.tenant?.tenant_id || viewModalData.tenant?.id || '-'}</div>
-              <div className="mt-4 d-flex justify-content-center gap-2">
+              {/* Do not display numeric DB primary keys in modal per requirements */}
+              <div className="mt-3 d-flex justify-content-center gap-2">
                 <button className="btn btn-secondary" onClick={() => setViewModal(false)}>Close</button>
                 <button className="btn btn-success" onClick={async()=>{
                   try{
@@ -272,12 +273,11 @@ const QRCodeGenerator = () => {
                     // try cached larger QR first
                     let dataUrl = qrCacheRef.current[`${id}_large`];
                     if (!dataUrl) {
-                      // if small preview exists use it, else generate large
                       if (viewModalData.qr_url && viewModalData.qr_url.startsWith('data:')) {
                         dataUrl = viewModalData.qr_url;
                       } else {
                         const tokenPayload = { type: 'tenant_token', tenant_id: id, tenant_name: viewModalData.tenant?.tenant_name || viewModalData.tenant?.name || '', apartment: viewModalData.tenant?.apartment || viewModalData.tenant?.apartment_number || '' };
-                        dataUrl = await QRCode.toDataURL(JSON.stringify(tokenPayload), { width: 800 });
+                        dataUrl = await QRCode.toDataURL(JSON.stringify(tokenPayload), { width: 1200 });
                       }
                       qrCacheRef.current[`${id}_large`] = dataUrl;
                     }
@@ -300,6 +300,24 @@ const QRCodeGenerator = () => {
         .qr-modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; backdrop-filter: blur(6px); animation: fadeIn .18s ease; z-index:1050; }
         .qr-modal{ background:#fff; border-radius:8px; max-width:520px; width:90%; box-shadow:0 8px 24px rgba(0,0,0,0.2); transform:translateY(0); animation: slideUp .18s ease; }
         .qr-modal-body{ padding:20px; }
+        .qr-modal{ background:#fff; border-radius:8px; max-width:820px; width:92%; box-shadow:0 10px 30px rgba(0,0,0,0.25); transform:translateY(0); animation: slideUp .18s ease; }
+        .qr-modal.view-qr-modal{ max-width:920px; width:86%; }
+        .qr-modal-body{ padding:22px; }
+        /* ensure modal sits below any fixed navbar and is vertically centered within visible window */
+        .qr-modal-overlay{ align-items:flex-start; padding-top:64px; }
+        /* make the QR image itself larger while keeping floating container compact */
+        .view-qr-floating{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:1060; display:flex; flex-direction:column; align-items:center; gap:14px; }
+        .view-qr-image-wrap{ background:#fff; padding:18px; border-radius:8px; box-shadow:0 10px 30px rgba(0,0,0,0.2); }
+        .view-qr-image{ display:block; width:auto; height:auto; max-height:72vh; max-width:72vw; object-fit:contain; }
+        .qr-info-box{ background:transparent; text-align:center; color:#222; }
+        /* ensure modal overlay doesn't overlap fixed navbar; if navbar is taller, the top offset will keep it visible */
+        .qr-modal-overlay{ position:fixed; inset:0; background:rgba(0,0,0,0.45); display:block; z-index:1050; }
+        @media(max-width:992px){
+          .view-qr-image{ max-width:88vw; max-height:60vh; }
+        }
+        @media(max-width:640px){
+          .view-qr-image{ max-width:94vw; max-height:56vh; }
+        }
         @keyframes fadeIn{ from{ opacity:0 } to{ opacity:1 } }
         @keyframes slideUp{ from{ transform:translateY(8px); opacity:0 } to{ transform:translateY(0); opacity:1 } }
       `}</style>
