@@ -5,7 +5,7 @@ import { useNavigate, NavLink } from 'react-router-dom';
 import axios from '../../axiosConfig';
 import { displayBillType } from '../../utils/billTypes';
 import { showToast } from '../../toastService';
-import { formatMeterNumber } from '../../utils/numberFormat';
+import { formatMeterNumber, formatCurrencyPeso } from '../../utils/numberFormat';
 // QR generation removed from Meter device management; QR handled in QRCodeGenerator component
 
 const MeterDeviceManagement = () => {
@@ -76,6 +76,30 @@ const MeterDeviceManagement = () => {
     // optional auto-refresh: refresh devices every 15 seconds
     const poll = setInterval(() => { try { refresh(); } catch(e){} }, 15000);
     return () => { clearInterval(poll); };
+  }, []);
+
+  // Listen for cross-tab/local updates when tenants or devices change so UI can refresh instantly
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e) return;
+      try {
+        const key = e.key;
+        if (!key) return;
+        if (key === 'meterDevicesUpdated' || key === 'apartmentsUpdated' || key === 'billsUpdated') {
+          try { refresh(); } catch (re) {}
+        }
+      } catch (er) {}
+    };
+    window.addEventListener('storage', handler);
+    // fallback: poll localStorage flag to catch same-tab updates
+    let last = localStorage.getItem('meterDevicesUpdated') || '';
+    const pollFlag = setInterval(() => {
+      try {
+        const cur = localStorage.getItem('meterDevicesUpdated') || '';
+        if (cur && cur !== last) { last = cur; try { refresh(); } catch(e){} }
+      } catch (e) {}
+    }, 2500);
+    return () => { window.removeEventListener('storage', handler); clearInterval(pollFlag); };
   }, []);
 
   // load persistent rates from localStorage and try backend
@@ -267,13 +291,26 @@ const MeterDeviceManagement = () => {
 
   const openUpdateModal = (device) => {
   setModalDevice(device);
-  setModalPrev(device.previous_reading ?? '');
-  setModalPresent(device.present_reading ?? '');
+  // show the previous reading as the device's current present_reading (previous <- present)
+  const pres = device.present_reading ?? '';
+  // helper to strip unnecessary trailing zeros like .000
+  const strip = (v) => {
+    if (v === null || v === undefined || v === '') return '';
+    const n = Number(v);
+    if (isNaN(n)) return String(v);
+    // convert to string removing trailing zeros after decimal point
+    let s = n.toString();
+    if (s.indexOf('.') >= 0) s = s.replace(/\.0+$|(?:([0-9]*[1-9])0+$)/, '$1');
+    return s;
+  };
+  setModalPrev(strip(pres));
+  // present should start empty for the new reading
+  setModalPresent('');
   // try to prefill date from last_updated or now
   const d = device.last_updated || device.updated_at || device.recorded_at || new Date().toISOString();
   // make a simple ISO-local datetime for input if possible
   try { setModalDate(new Date(d).toISOString().slice(0,16)); } catch(e) { setModalDate(new Date().toISOString().slice(0,16)); }
-  setModalValue(device.present_reading || '');
+  setModalValue('');
   setShowModal(true);
   };
 
@@ -418,8 +455,8 @@ const MeterDeviceManagement = () => {
             <h6 className="m-0" style={{ marginRight: 8 }}>Devices</h6>
           </div>
           <div className="mdm-center">
-            <span className="mdm-rate-small">Electricity (₱ / kWh): <strong>{Number(electricityRate || 0).toFixed(2)}</strong></span>
-            <span style={{ marginLeft: 12 }} className="mdm-rate-small">Water (₱ / m³): <strong>{Number(waterRate || 0).toFixed(2)}</strong></span>
+            <span className="mdm-rate-small">Electricity (₱ / kWh): <strong>{formatCurrencyPeso(electricityRate)}</strong></span>
+            <span style={{ marginLeft: 12 }} className="mdm-rate-small">Water (₱ / m³): <strong>{formatCurrencyPeso(waterRate)}</strong></span>
             <button className="btn btn-sm btn-outline-primary" style={{ marginLeft: 10 }} onClick={() => setShowRatesModal(true)}>Edit Rates</button>
           </div>
           <div>
@@ -463,14 +500,20 @@ const MeterDeviceManagement = () => {
                               <td style={{ textAlign: 'center' }}>{formatMeterNumber(d.previous_reading ?? '')}</td>
                               <td style={{ textAlign: 'center' }}>{formatMeterNumber(d.present_reading ?? '')}</td>
                               <td style={{ textAlign: 'center' }}>{formatMeterNumber(d.consumption ?? d.usage ?? '')}</td>
-                              <td style={{ textAlign: 'center' }}>{d.rate != null ? formatMeterNumber(d.rate) : ''}</td>
-                              <td style={{ textAlign: 'center' }}>{d.total_cost != null ? formatMeterNumber(d.total_cost) : ''}</td>
+                              <td style={{ textAlign: 'center' }}>{d.rate != null ? formatCurrencyPeso(d.rate) : ''}</td>
+                              <td style={{ textAlign: 'center' }}>{d.total_cost != null ? formatCurrencyPeso(d.total_cost) : ''}</td>
                               <td style={{ textAlign: 'center' }}>{d.last_updated ? new Date(d.last_updated).toLocaleString() : '-'}</td>
                               <td style={{ textAlign: 'center' }}>
                                 <div className="d-flex justify-content-center gap-2">
-                                  <button className="btn btn-sm btn-outline-secondary" onClick={() => openUpdateModal(d)}>Update Reading</button>
-                                  <button className="btn btn-sm btn-outline-secondary" onClick={() => openEditModal(d)}>Edit</button>
-                                  <button className="btn btn-sm btn-outline-danger" onClick={() => deleteDevice(d.id)}>Delete</button>
+                                  <button type="button" className="btn btn-sm btn-outline-secondary mdm-icon-btn" title="Update Reading" onClick={() => openUpdateModal(d)}>
+                                    <span aria-hidden="true">🔄</span>
+                                  </button>
+                                  <button type="button" className="btn btn-sm btn-outline-secondary mdm-icon-btn" title="Edit" onClick={() => openEditModal(d)}>
+                                    <span aria-hidden="true">✏️</span>
+                                  </button>
+                                  <button type="button" className="btn btn-sm btn-outline-danger mdm-icon-btn" title="Delete" onClick={() => deleteDevice(d.id)}>
+                                    <span aria-hidden="true">🗑️</span>
+                                  </button>
                                 </div>
                               </td>
                             </tr>
@@ -508,42 +551,30 @@ const MeterDeviceManagement = () => {
                   <div className="modal-body">
                     <div className="mb-3">
                       <label className="form-label">Previous Reading</label>
-                      <input type="number" step="0.001" className="form-control" value={modalPrev} onChange={e => setModalPrev(e.target.value)} />
+                      <input type="number" step="0.001" className="form-control" value={modalPrev} readOnly />
                     </div>
                     <div className="mb-3">
                       <label className="form-label">Present Reading</label>
-                      <input autoFocus type="number" step="0.001" className="form-control" value={modalPresent || modalValue} onChange={e => { setModalPresent(e.target.value); setModalValue(e.target.value); }} />
+                      <input autoFocus type="number" step="0.001" className="form-control" value={modalValue} onChange={e => { setModalValue(e.target.value); }} />
                     </div>
                     <div className="mb-3">
                       <label className="form-label">Reading Date</label>
                       <input type="datetime-local" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
                     </div>
-                    <div className="mb-3 d-flex gap-2">
+                      <div className="mb-3 d-flex gap-2">
                       <div style={{ flex: 1 }}>
                         <label className="form-label">Consumption</label>
                         <input className="form-control" value={modalConsumption} readOnly />
                       </div>
                       <div style={{ width: 140 }}>
                         <label className="form-label">Total Cost</label>
-                        <input className="form-control" value={modalTotalCost} readOnly />
+                        <input className="form-control" value={modalTotalCost ? formatCurrencyPeso(modalTotalCost) : ''} readOnly />
                       </div>
                     </div>
                   </div>
                   <div className="modal-footer">
                     <button className="btn btn-secondary" onClick={closeModal}>Cancel</button>
-                    <button className="btn btn-primary" onClick={async () => {
-                      // submit updated reading, previous and optionally date
-                      const prev = Number(modalPrev || 0);
-                      const pres = Number(modalPresent || modalValue || 0);
-                      if (isNaN(pres)) { setError('Invalid present reading'); return; }
-                      try {
-                        await axios.put(`/api/meter-devices/${modalDevice.id}`, { ...modalDevice, previous_reading: prev, present_reading: pres, last_updated: modalDate });
-                        await refresh();
-                        closeModal();
-                      } catch (err) {
-                        setError(err.response?.data?.message || 'Failed to update reading');
-                      }
-                    }}>Save</button>
+                    <button className="btn btn-primary" onClick={async () => { await submitUpdateReading(); }}>Save</button>
                   </div>
                 </div>
               </div>
@@ -649,14 +680,14 @@ const MeterDeviceManagement = () => {
                       <label className="form-label">Reading Date</label>
                       <input type="datetime-local" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
                     </div>
-                    <div className="mb-3 d-flex gap-2">
+          <div className="mb-3 d-flex gap-2">
                       <div style={{ flex: 1 }}>
                         <label className="form-label">Consumption</label>
                         <input className="form-control" value={modalConsumption} readOnly />
                       </div>
                       <div style={{ width: 140 }}>
                         <label className="form-label">Total Cost</label>
-                        <input className="form-control" value={modalTotalCost} readOnly />
+            <input className="form-control" value={modalTotalCost ? formatCurrencyPeso(modalTotalCost) : ''} readOnly />
                       </div>
                     </div>
                   </div>

@@ -1,0 +1,143 @@
+:root{
+  --card-bg: #ffffff;
+  --muted: #6b7280;
+  --accent: linear-gradient(90deg,#6d28d9 0%,#06b6d4 100%);
+  --input-border: #e5e7eb;
+  --danger: #ef4444;
+}
+
+.pm-login-root{
+  /* ensure root spans full viewport height so backdrop covers entire visible area */
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+}
+
+.pm-login-backdrop{
+  /* make the backdrop fixed so it always fills the viewport and doesn't create overlay bands
+     at the bottom when the page content is shorter than the viewport */
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* background image is applied inline from the component to allow bundler to resolve the asset */
+  background: linear-gradient(180deg, rgba(13,18,25,0.55), rgba(13,18,25,0.35));
+  background-size: cover;
+  background-position: center;
+  filter: blur(0px) saturate(90%);
+  z-index: 0;
+}
+
+.pm-login-container{
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 480px;
+}
+
+.pm-login-card{
+  background: var(--card-bg);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(2,6,23,0.2);
+  padding: 28px 28px;
+  border: 1px solid rgba(15,23,42,0.04);
+}
+
+.pm-login-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.pm-login-header h2{
+  margin:0;
+  font-size: 1.6rem;
+  color: #0f172a;
+}
+
+.pm-link{
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.pm-link:hover{ opacity: 0.9; }
+
+.pm-login-form{
+  display:flex;
+  flex-direction:column;
+  gap: 12px;
+}
+
+.pm-label{
+  font-size: 0.9rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.pm-input{
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--input-border);
+  outline: none;
+  font-size: 0.95rem;
+  transition: box-shadow 160ms ease, border-color 160ms ease, transform 120ms ease;
+  background: #fff;
+}
+
+.pm-input::placeholder{ color: #9ca3af; }
+
+.pm-input:hover{
+  transform: translateY(-1px);
+}
+
+.pm-input:focus{
+  border-color: rgba(99,102,241,0.9);
+  box-shadow: 0 6px 18px rgba(99,102,241,0.08), 0 0 0 4px rgba(99,102,241,0.06);
+}
+
+.pm-error{
+  color: var(--danger);
+  background: rgba(239,68,68,0.06);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(239,68,68,0.08);
+  font-size: 0.92rem;
+}
+
+.pm-submit{
+  margin-top: 6px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  font-weight: 600;
+  background-image: var(--accent);
+  background-size: 200% 100%;
+  transition: transform 120ms ease, filter 120ms ease, background-position 220ms ease;
+  box-shadow: 0 6px 18px rgba(6,182,212,0.08);
+}
+
+.pm-submit:hover{
+  transform: translateY(-2px);
+  filter: brightness(1.02);
+  background-position: 100% 0;
+}
+
+@media (max-width: 520px){
+  .pm-login-container{ padding: 0 10px; }
+  .pm-login-card{ padding: 20px; }
+  .pm-login-header h2{ font-size: 1.25rem; }
+}

@@ -10,7 +10,7 @@ const Home = () => {
         <div className="card-glass" style={{ padding: 32 }}>
           <div style={{ textAlign: 'center', marginBottom: 20 }}>
             <div style={{ fontSize: 13, color: '#64748b', fontWeight: 700, letterSpacing: '.08em' }}>SMART APARTMENT</div>
-            <h1 style={{ margin: '8px 0 6px', fontSize: 36, lineHeight: 1.08 }}>Meter-Enabled Management System</h1>
+            <h1 style={{ margin: '8px 0 6px', fontSize: 36, lineHeight: 1.08 }}>Smart ID Apartment Monitoring System</h1>
             <p style={{ margin: '0 0 14px', color: '#475569' }}>Smart ID access • Real‑time Meter • Automated Billing</p>
           </div>
 

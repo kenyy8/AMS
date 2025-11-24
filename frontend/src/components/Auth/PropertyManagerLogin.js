@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import axios from '../../axiosConfig';
 import { useNavigate } from 'react-router-dom';
+import './PropertyManagerLogin.css';
+import bgImage from '../../AMSBG.jpg';
 
 const PropertyManagerLogin = () => {
   const [email, setEmail] = useState('');
@@ -22,35 +24,38 @@ const PropertyManagerLogin = () => {
   };
 
   return (
-    <div className="container" style={{ minHeight: '70vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div className="card">
-        <div className="card-body">
-          <h2 className="card-title">Property Manager Login</h2>
-          <button className="btn btn-link mb-3" onClick={() => navigate('/')}>Back to Home</button>
-          <form onSubmit={handleLogin}>
-            <div className="form-group">
-              <label className="form-label">Email:</label>
-              <input 
-                type="email" 
-                className="form-control" 
-                value={email}
-                onChange={e => setEmail(e.target.value)} 
-                placeholder="manager@apartment.com"
-                required 
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Password:</label>
-              <input 
-                type="password" 
-                className="form-control" 
-                value={password}
-                onChange={e => setPassword(e.target.value)} 
-                required 
-              />
-            </div>
-            {error && <div className="alert alert-danger">{error}</div>}
-            <button className="btn btn-primary mt-3" type="submit">Log In</button>
+    <div className="pm-login-root">
+
+      <div className="pm-login-container">
+        <div className="pm-login-card">
+          <div className="pm-login-header">
+            <h2>Property Manager Login</h2>
+            <button className="pm-link" onClick={() => navigate('/')}>Back to Home</button>
+          </div>
+
+          <form className="pm-login-form" onSubmit={handleLogin}>
+            <label className="pm-label">Email</label>
+            <input
+              type="email"
+              className="pm-input"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="manager@email.com"
+              required
+            />
+
+            <label className="pm-label">Password</label>
+            <input
+              type="password"
+              className="pm-input"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              required
+            />
+
+            {error && <div className="pm-error">{error}</div>}
+
+            <button className="pm-submit" type="submit">Log In</button>
           </form>
         </div>
       </div>

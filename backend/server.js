@@ -424,38 +424,38 @@ app.get('/api/bills', (req, res) => {
   });
 });
 
-// Reports: aggregated bills by day within date range
-app.get('/api/reports/bills', (req, res) => {
-  const { startDate, endDate } = req.query;
-  if (!startDate || !endDate) return res.status(400).json({ message: 'startDate and endDate required (YYYY-MM-DD)' });
-  // aggregate by day: sum of paid and due
-  const sql = `
-    SELECT DATE(due_date) AS day,
-      SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END) AS paid_total,
-      SUM(CASE WHEN status != 'paid' THEN amount ELSE 0 END) AS due_total
-    FROM bills
-    WHERE DATE(due_date) BETWEEN ? AND ?
-    GROUP BY DATE(due_date)
-    ORDER BY DATE(due_date) ASC
-  `;
-  db.query(sql, [startDate, endDate], (err, rows) => {
-    if (err) return res.status(500).json({ message: 'Failed to aggregate bills' });
-    res.json(rows.map(r => ({ day: r.day, paid: Number(r.paid_total)||0, due: Number(r.due_total)||0 })));
-  });
-});
+// NOTE: reports-by-day aggregation was removed in favor of strict reports data
+// The active reports endpoint for the UI is defined later in this file and
+// returns paid rows from `payment_history` joined to `bills`, and pending
+// rows coming directly from `bills` (only those without payment_history).
+// Keeping this comment here to avoid accidental re-introduction of the old logic.
 
 // Reports: aggregated totals by bill_type for date range
 app.get('/api/reports/by-type', (req, res) => {
   const { startDate, endDate } = req.query;
   if (!startDate || !endDate) return res.status(400).json({ message: 'startDate and endDate required (YYYY-MM-DD)' });
+  // Strict sources: paid amounts come from payment_history.paid_at between dates;
+  // pending amounts come from bills.due_date between dates but only for bills
+  // that do NOT have a payment_history record. We UNION both and aggregate by bill_type.
   const sql = `
-    SELECT bill_type, SUM(amount) AS total
-    FROM bills
-    WHERE DATE(due_date) BETWEEN ? AND ?
+    SELECT bill_type, SUM(amount) AS total FROM (
+      SELECT b.bill_type AS bill_type, ph.amount_paid AS amount
+      FROM payment_history ph
+      JOIN bills b ON ph.bill_id = b.id
+      WHERE DATE(ph.paid_at) BETWEEN ? AND ?
+
+      UNION ALL
+
+      SELECT b.bill_type AS bill_type, b.amount AS amount
+      FROM bills b
+      WHERE DATE(b.due_date) BETWEEN ? AND ?
+        AND (b.status IS NULL OR b.status <> 'paid')
+    ) AS unioned
     GROUP BY bill_type
     ORDER BY total DESC
   `;
-  db.query(sql, [startDate, endDate], (err, rows) => {
+  // pass startDate,endDate for paid (paid_at) then for pending (due_date)
+  db.query(sql, [startDate, endDate, startDate, endDate], (err, rows) => {
     if (err) return res.status(500).json({ message: 'Failed to aggregate by type' });
     res.json(rows.map(r => ({ type: r.bill_type, total: Number(r.total)||0 })));
   });
@@ -553,33 +553,51 @@ app.patch('/api/bills/:id/status', (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   if (status === 'pending') {
-    const sql = 'UPDATE bills SET status = ? WHERE id = ?';
-    db.query(sql, [status, id], (err) => {
-      if (err) {
-        console.error('PATCH /api/bills/:id/status - pending error:', err);
-        return res.status(500).json({ message: 'Failed to update bill status', error: err.message });
+    // revert payment: delete any payment_history rows and set bill to pending
+    db.query('DELETE FROM payment_history WHERE bill_id = ?', [id], (delErr) => {
+      if (delErr) {
+        console.error('PATCH /api/bills/:id/status - pending delete payment_history error:', delErr);
+        return res.status(500).json({ message: 'Failed to revert payment history', error: delErr.message });
       }
-      return res.json({ message: 'Bill status updated' });
+      db.query('UPDATE bills SET status = ? WHERE id = ?', [status, id], (uErr) => {
+        if (uErr) {
+          console.error('PATCH /api/bills/:id/status - pending update error:', uErr);
+          return res.status(500).json({ message: 'Failed to update bill status', error: uErr.message });
+        }
+        return res.json({ message: 'Bill status updated and payment history removed' });
+      });
     });
   } else if (status === 'paid') {
-    const sql = 'UPDATE bills SET status = ?, paid_at = NOW() WHERE id = ?';
-    db.query(sql, [status, id], (err) => {
-      if (err) {
-        console.error('PATCH /api/bills/:id/status - paid error:', err);
-        // fallback if paid_at column doesn't exist
-        if (err.code === 'ER_BAD_FIELD_ERROR' || (err.message && err.message.includes('Unknown column'))) {
-          db.query('UPDATE bills SET status = ? WHERE id = ?', [status, id], (err2) => {
-            if (err2) {
-              console.error('PATCH /api/bills/:id/status - paid fallback error:', err2);
-              return res.status(500).json({ message: 'Failed to mark paid (fallback failed)', error: err2.message });
-            }
-            return res.json({ message: 'Bill marked paid (no paid_at column)' });
-          });
-          return;
-        }
-        return res.status(500).json({ message: 'Failed to mark paid', error: err.message });
+    // Mark as paid: insert into payment_history if not already present and update bill.status
+    db.query('SELECT * FROM bills WHERE id = ?', [id], (bErr, bRows) => {
+      if (bErr) {
+        console.error('PATCH /api/bills/:id/status - select bill error:', bErr);
+        return res.status(500).json({ message: 'DB error' });
       }
-      return res.json({ message: 'Bill marked paid' });
+      if (!bRows || bRows.length === 0) return res.status(404).json({ message: 'Bill not found' });
+      const bill = bRows[0];
+      if ((bill.status || '').toString().toLowerCase() === 'paid') return res.status(409).json({ message: 'Bill already marked paid' });
+      // check payment_history existence
+      db.query('SELECT COUNT(*) AS cnt FROM payment_history WHERE bill_id = ?', [id], (phErr, phRows) => {
+        if (phErr) return res.status(500).json({ message: 'DB error' });
+        const cnt = (phRows && phRows[0] && phRows[0].cnt) || 0;
+        if (cnt > 0) {
+          // still update bill status for UI reflection
+          db.query('UPDATE bills SET status = ? WHERE id = ?', ['paid', id], () => {});
+          return res.status(409).json({ message: 'Payment history already exists for this bill' });
+        }
+        // insert payment record using bill.amount and NOW()
+        db.query('INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, NOW())', [id, bill.amount || 0], (insErr, insRes) => {
+          if (insErr) {
+            console.error('PATCH /api/bills/:id/status - insert payment_history error:', insErr);
+            return res.status(500).json({ message: 'Failed to record payment', error: insErr.message });
+          }
+          db.query('UPDATE bills SET status = ? WHERE id = ?', ['paid', id], (uErr) => {
+            if (uErr) console.warn('PATCH /api/bills/:id/status - update status after payment error:', uErr && uErr.message ? uErr.message : uErr);
+            return res.json({ message: 'Bill marked paid and payment recorded', payment_id: insRes.insertId });
+          });
+        });
+      });
     });
   } else if (status === 'paused') {
     // simple status change to paused; no paused_until handling
@@ -735,7 +753,7 @@ app.post('/api/meter-devices/settings/rates', (req, res) => {
   return meterController.setRates(req, res);
 });
 
-app.get('/api/meter-devices/billing-history', (req, res) => {
+app.get('/api/meter-devices/meter-history', (req, res) => {
   return meterController.getBillingHistory(req, res);
 });
 
@@ -817,24 +835,218 @@ app.post('/api/qr-codes/scan', (req, res) => {
   });
 });
 
-// Enhanced API: Bills
+// Bills API (simple): return bills with tenant name
 app.get('/api/bills', (req, res) => {
-  const { tenantId } = req.query;
-  const params = [];
-  let where = '';
-  if (tenantId) {
-    where = 'WHERE b.tenant_id = ?';
-    params.push(tenantId);
-  }
   const sql = `
-    SELECT b.*, t.name AS tenant_name, t.is_paused AS tenant_is_paused, t.status AS tenant_status
+    SELECT b.*, t.name AS tenant_name
     FROM bills b
     LEFT JOIN tenants t ON b.tenant_id = t.id
-    ${where}
-    ORDER BY b.due_date DESC
+    ORDER BY b.due_date ASC
   `;
-  db.query(sql, params, (err, rows) => {
+  db.query(sql, (err, rows) => {
     if (err) return res.status(500).json({ message: 'Failed to fetch bills' });
+    res.json(rows);
+  });
+});
+
+// Mark bill as paid: creates payment_history entry (only if not already paid via payment_history)
+app.post('/api/bills/:id/pay', (req, res) => {
+  const { id } = req.params;
+  let { amount_paid, paid_at } = req.body;
+  amount_paid = amount_paid !== undefined ? amount_paid : null;
+  // default paid_at to NOW() when not provided
+  const paidAtSql = paid_at ? '?': 'NOW()';
+
+  // Check bill exists and not already paid in payment_history
+  db.query('SELECT * FROM bills WHERE id = ?', [id], (bErr, bRows) => {
+    if (bErr) return res.status(500).json({ message: 'DB error' });
+    if (!bRows || bRows.length === 0) return res.status(404).json({ message: 'Bill not found' });
+    // check existing payment_history for this bill
+    db.query('SELECT COUNT(*) AS cnt FROM payment_history WHERE bill_id = ?', [id], (phErr, phRows) => {
+      if (phErr) return res.status(500).json({ message: 'DB error' });
+      const cnt = (phRows && phRows[0] && phRows[0].cnt) || 0;
+      if (cnt > 0) return res.status(409).json({ message: 'Bill already has payment history (already paid)' });
+
+      // if amount_paid not provided, fall back to bill amount
+      const amtPromise = new Promise((resolve) => { if (amount_paid !== null) return resolve(amount_paid); return resolve(bRows[0].amount || 0); });
+      amtPromise.then((amt) => {
+        const insertSql = `INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, ${paidAtSql})`;
+        const params = paid_at ? [id, amt, paid_at] : [id, amt];
+        db.query(insertSql, params, (insErr, insRes) => {
+          if (insErr) {
+            console.error('Failed to insert payment_history:', insErr);
+            return res.status(500).json({ message: 'Failed to record payment', error: insErr.message });
+          }
+          // update bills.status to paid for UI reflection (do not use bills.amount for revenue)
+          db.query('UPDATE bills SET status = ? WHERE id = ?', ['paid', id], (uErr) => {
+            if (uErr) console.warn('Failed to update bill status after payment:', uErr.message || uErr);
+            return res.json({ message: 'Payment recorded', payment_id: insRes.insertId });
+          });
+        });
+      });
+    });
+  });
+});
+
+// Revert payment: deletes payment_history entry for a bill (all entries) and set bill.status back to pending
+app.delete('/api/bills/:id/pay', (req, res) => {
+  const { id } = req.params;
+  // delete payment_history entries
+  db.query('DELETE FROM payment_history WHERE bill_id = ?', [id], (delErr, delRes) => {
+    if (delErr) return res.status(500).json({ message: 'Failed to delete payment history' });
+    // set bill status to pending
+    db.query('UPDATE bills SET status = ? WHERE id = ?', ['pending', id], (uErr) => {
+      if (uErr) return res.status(500).json({ message: 'Failed to revert bill status' });
+      return res.json({ message: 'Payment reverted', deleted: delRes.affectedRows });
+    });
+  });
+});
+
+// Bulk mark bills as paid (toolbar global date applies to all)
+app.post('/api/bills/pay', (req, res) => {
+  const { bill_ids, paid_at, amount_paid } = req.body;
+  if (!Array.isArray(bill_ids) || bill_ids.length === 0) return res.status(400).json({ message: 'bill_ids array required' });
+
+  const results = { inserted: 0, skipped: 0, errors: [] };
+  const tasks = bill_ids.map(id => new Promise((resolve) => {
+    db.query('SELECT * FROM bills WHERE id = ?', [id], (bErr, bRows) => {
+      if (bErr) { results.errors.push({ id, error: bErr.message || bErr }); results.skipped++; return resolve(); }
+      if (!bRows || bRows.length === 0) { results.skipped++; return resolve(); }
+      db.query('SELECT COUNT(*) AS cnt FROM payment_history WHERE bill_id = ?', [id], (phErr, phRows) => {
+        if (phErr) { results.errors.push({ id, error: phErr.message || phErr }); results.skipped++; return resolve(); }
+        const cnt = (phRows && phRows[0] && phRows[0].cnt) || 0;
+        if (cnt > 0) { results.skipped++; return resolve(); }
+        const insSql = paid_at ? 'INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, ?)' : 'INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, NOW())';
+        const amt = (amount_paid !== undefined && amount_paid !== null) ? amount_paid : (bRows[0].amount || 0);
+        const params = paid_at ? [id, amt, paid_at] : [id, amt];
+        db.query(insSql, params, (insErr, insRes) => {
+          if (insErr) { results.errors.push({ id, error: insErr.message || insErr }); results.skipped++; return resolve(); }
+          results.inserted++;
+          db.query('UPDATE bills SET status = ? WHERE id = ?', ['paid', id], () => resolve());
+        });
+      });
+    });
+  }));
+
+  Promise.all(tasks).then(() => res.json({ message: 'Bulk payment processed', results })).catch(e => res.status(500).json({ message: 'Bulk payment failed', error: e && e.message ? e.message : e }));
+});
+
+// Bulk revert/unpay selected bills
+app.post('/api/bills/unpay', (req, res) => {
+  const { bill_ids } = req.body;
+  if (!Array.isArray(bill_ids) || bill_ids.length === 0) return res.status(400).json({ message: 'bill_ids array required' });
+  const results = { deleted: 0, errors: [] };
+  const tasks = bill_ids.map(id => new Promise((resolve) => {
+    db.query('DELETE FROM payment_history WHERE bill_id = ?', [id], (delErr, delRes) => {
+      if (delErr) { results.errors.push({ id, error: delErr.message || delErr }); return resolve(); }
+      results.deleted += (delRes && delRes.affectedRows) ? delRes.affectedRows : 0;
+      db.query('UPDATE bills SET status = ? WHERE id = ?', ['pending', id], () => resolve());
+    });
+  }));
+  Promise.all(tasks).then(() => res.json({ message: 'Bulk unpay processed', results })).catch(e => res.status(500).json({ message: 'Bulk unpay failed', error: e && e.message ? e.message : e }));
+});
+
+// List payment history (optionally filtered by tenant)
+app.get('/api/payment-history', (req, res) => {
+  const { tenantId } = req.query;
+  let sql = `SELECT ph.*, b.tenant_id, b.bill_type, b.amount AS bill_amount FROM payment_history ph JOIN bills b ON ph.bill_id = b.id`;
+  const params = [];
+  if (tenantId) {
+    sql += ' WHERE b.tenant_id = ?';
+    params.push(tenantId);
+  }
+  sql += ' ORDER BY ph.paid_at DESC';
+  db.query(sql, params, (err, rows) => {
+    if (err) return res.status(500).json({ message: 'Failed to fetch payment history' });
+    res.json(rows);
+  });
+});
+
+// Monthly income sum endpoint using payment_history
+app.get('/api/payment-history/monthly/:year/:month', (req, res) => {
+  const { year, month } = req.params;
+  const sql = 'SELECT IFNULL(SUM(amount_paid),0) AS total FROM payment_history WHERE MONTH(paid_at) = ? AND YEAR(paid_at) = ?';
+  db.query(sql, [month, year], (err, rows) => {
+    if (err) return res.status(500).json({ message: 'Failed to compute monthly income' });
+    res.json({ total: (rows && rows[0] && rows[0].total) || 0 });
+  });
+});
+
+// Reports API: combine pending bills (from bills) and paid entries (from payment_history)
+// Strict sources: pending -> bills table (no payment_history entries), paid -> payment_history table
+// Query params: startDate (YYYY-MM-DD) for inclusive start, endDate (YYYY-MM-DD) for inclusive end, tenantId optional
+app.get('/api/reports/bills', (req, res) => {
+  const { startDate, endDate, tenantId } = req.query;
+  const paramsPending = [];
+  const paramsPaid = [];
+
+  // Build tenant filter (applied to both paid and pending selects)
+  let tenantFilter = '';
+  if (tenantId) {
+    tenantFilter = 'AND b.tenant_id = ?';
+  }
+
+  // Apply server-side date filters when provided: startDate/endDate apply to
+  // payment_history.paid_at for paid rows and bills.due_date for pending rows.
+  let pendingDateFilter = '';
+  let paidDateFilter = '';
+
+  if (startDate && endDate) {
+    paidDateFilter = 'AND DATE(ph.paid_at) BETWEEN ? AND ?';
+    pendingDateFilter = 'AND DATE(b.due_date) BETWEEN ? AND ?';
+    // params for paid select first, then pending select
+    paramsPaid.push(startDate, endDate);
+    paramsPending.push(startDate, endDate);
+  }
+
+  if (tenantId) {
+    // tenantFilter will be interpolated into both SELECTs; we'll pass tenantId twice
+    paramsPaid.push(tenantId);
+    paramsPending.push(tenantId);
+  }
+
+  const sql = `
+    SELECT
+      ph.id AS payment_history_id,
+      ph.bill_id AS bill_id,
+      b.tenant_id,
+      b.bill_type,
+      ph.amount_paid AS amount,
+      'paid' AS status,
+      ph.paid_at AS due_date,
+      t.name AS tenant_name,
+      t.is_paused AS tenant_is_paused,
+      t.status AS tenant_status
+    FROM payment_history ph
+    JOIN bills b ON ph.bill_id = b.id
+    LEFT JOIN tenants t ON b.tenant_id = t.id
+  WHERE 1=1 ${paidDateFilter} ${tenantFilter}
+
+    UNION ALL
+
+    SELECT
+      NULL AS payment_history_id,
+      b.id AS bill_id,
+      b.tenant_id,
+      b.bill_type,
+      b.amount AS amount,
+      b.status AS status,
+      b.due_date AS due_date,
+      t.name AS tenant_name,
+      t.is_paused AS tenant_is_paused,
+      t.status AS tenant_status
+    FROM bills b
+    LEFT JOIN tenants t ON b.tenant_id = t.id
+    -- Match Bill Management: treat pending bills as those with status != 'paid'
+    WHERE (b.status IS NULL OR b.status <> 'paid') ${pendingDateFilter} ${tenantFilter}
+
+    ORDER BY due_date DESC
+  `;
+
+  // We'll pass paid params first (start,end,tenant?) then pending params
+  const finalParams = paramsPaid.concat(paramsPending);
+  db.query(sql, finalParams, (err, rows) => {
+    if (err) return res.status(500).json({ message: 'Failed to fetch reports bills' });
     res.json(rows);
   });
 });
@@ -966,6 +1178,20 @@ app.listen(PORT, async () => {
   await ensureMeterColumns();
   // Ensure tenants have is_paused column
   await ensureTenantIsPausedColumn();
+
+    // Ensure payment_history table exists for revenue tracking
+    const ensurePaymentHistorySql = `
+    CREATE TABLE IF NOT EXISTS \`payment_history\` (
+      \`id\` INT AUTO_INCREMENT PRIMARY KEY,
+      \`bill_id\` INT NOT NULL,
+      \`amount_paid\` DECIMAL(12,2) NOT NULL DEFAULT 0,
+      \`paid_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
+    )`;
+    db.query(ensurePaymentHistorySql, (err) => {
+      if (err) console.warn('Failed to ensure payment_history table exists:', err && err.message ? err.message : err);
+    });
 
     // Final connected message appears last after setup finishes
     console.log('Connected to MySQL database successfully');

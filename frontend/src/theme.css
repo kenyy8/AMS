@@ -64,8 +64,8 @@ body.show-ams-bg::before{ opacity: 1; }
 /* Default app background for other pages: subtle blue gradient */
 body{ background: linear-gradient(180deg, #e6f0ff 0%, #f8fbff 100%); }
 
-/* Reduce background opacity automatically on authentication pages */
-body.auth-page::before{ opacity: 0.5; }
+/* Ensure background image is fully visible on authentication pages */
+body.auth-page::before{ opacity: .8; }
 
 /* Ensure the background doesn't create white margins on resize */
 html, body, #root { height: 100%; margin: 0; padding: 0; }
@@ -102,7 +102,19 @@ html, body, #root { height: 100%; margin: 0; padding: 0; }
 .container-narrow{ width:100%; max-width:1200px; margin:0 auto; position:relative; padding:0 12px; box-sizing:border-box; }
 
 /* Glass card used on Home */
-.card-glass{ background: rgba(255,255,255,0.96); border-radius:14px; box-shadow: 0 20px 40px rgba(2,6,23,0.18); }
+.card-glass {
+  background: rgba(255, 255, 255, 0.18); /* Transparent frosted glass */
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  
+  box-shadow: 0 8px 32px rgba(2, 6, 23, 0.25);
+  
+  padding: 20px;
+  /* No hover or movement for the container */
+}
 
 /* Hero inner title styles */
 .hero-center .card-glass h1{ color:#0f172a; font-weight:700; margin-bottom:6px; }

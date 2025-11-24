@@ -8,11 +8,11 @@ exports.updateReadingByDeviceId = async (device_id, current_reading, last_readin
 };
 
 /**
- * Insert an entry into billing_history table
+ * Insert an entry into meter_history table (legacy name was billing_history)
  */
 exports.insertBillingHistory = async (history) => {
   try {
-    const sql = `INSERT INTO billing_history
+    const sql = `INSERT INTO meter_history
       (tenant_name, apartment_number, device_id, meter_type, previous_reading, present_reading, consumption, rate, total_cost, recorded_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
     const params = [
@@ -32,7 +32,7 @@ exports.insertBillingHistory = async (history) => {
   } catch (e) {
     console.warn('insertBillingHistory failed, attempting to create table or skipping insertion:', e && e.message);
     try {
-      const createSql = `CREATE TABLE IF NOT EXISTS billing_history (
+      const createSql = `CREATE TABLE IF NOT EXISTS meter_history (
         id INT AUTO_INCREMENT PRIMARY KEY,
         tenant_name VARCHAR(150),
         apartment_number VARCHAR(50),
@@ -47,7 +47,7 @@ exports.insertBillingHistory = async (history) => {
       )`;
       await db.query(createSql);
       // retry once
-      const sql = `INSERT INTO billing_history
+      const sql = `INSERT INTO meter_history
         (tenant_name, apartment_number, device_id, meter_type, previous_reading, present_reading, consumption, rate, total_cost, recorded_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
       const params = [
@@ -65,7 +65,72 @@ exports.insertBillingHistory = async (history) => {
       const [res2] = await db.query(sql, params);
       return res2.insertId;
     } catch (inner) {
-      console.error('Failed to create billing_history table or insert:', inner && inner.message ? inner.message : inner);
+      console.error('Failed to create meter_history table or insert:', inner && inner.message ? inner.message : inner);
+      // don't throw further; history is best-effort
+      return null;
+    }
+  }
+};
+
+/**
+ * Insert an entry into meter_history table (stores reading changes). This is separate from billing_history.
+ */
+exports.insertMeterHistory = async (history) => {
+  try {
+    const sql = `INSERT INTO meter_history
+      (tenant_name, apartment_number, device_id, meter_type, previous_reading, present_reading, consumption, rate, total_cost, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    const params = [
+      history.tenant_name || null,
+      history.apartment_number || null,
+      history.device_id,
+      history.meter_type,
+      history.previous_reading || 0,
+      history.present_reading || 0,
+      history.consumption || 0,
+      history.rate || 0,
+      history.total_cost || 0,
+      history.recorded_at || new Date()
+    ];
+    const [res] = await db.query(sql, params);
+    return res.insertId;
+  } catch (e) {
+    console.warn('insertMeterHistory failed, attempting to create table or skipping insertion:', e && e.message);
+    try {
+      const createSql = `CREATE TABLE IF NOT EXISTS meter_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        tenant_name VARCHAR(150),
+        apartment_number VARCHAR(50),
+        device_id VARCHAR(100),
+        meter_type VARCHAR(100),
+        previous_reading DECIMAL(12,3) DEFAULT 0,
+        present_reading DECIMAL(12,3) DEFAULT 0,
+        consumption DECIMAL(12,3) DEFAULT 0,
+        rate DECIMAL(12,3) DEFAULT 0,
+        total_cost DECIMAL(12,2) DEFAULT 0,
+        recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`;
+      await db.query(createSql);
+      // retry once
+      const sql = `INSERT INTO meter_history
+        (tenant_name, apartment_number, device_id, meter_type, previous_reading, present_reading, consumption, rate, total_cost, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+      const params = [
+        history.tenant_name || null,
+        history.apartment_number || null,
+        history.device_id,
+        history.meter_type,
+        history.previous_reading || 0,
+        history.present_reading || 0,
+        history.consumption || 0,
+        history.rate || 0,
+        history.total_cost || 0,
+        history.recorded_at || new Date()
+      ];
+      const [res2] = await db.query(sql, params);
+      return res2.insertId;
+    } catch (inner) {
+      console.error('Failed to create meter_history table or insert:', inner && inner.message ? inner.message : inner);
       // don't throw further; history is best-effort
       return null;
     }
@@ -176,10 +241,20 @@ exports.getBillingHistory = async ({ tenant, from, to, limit = 200 }) => {
   if (from) { where.push('recorded_at >= ?'); params.push(from); }
   if (to) { where.push('recorded_at <= ?'); params.push(to); }
   const whereSql = where.length ? ('WHERE ' + where.join(' AND ')) : '';
-  const sql = `SELECT * FROM billing_history ${whereSql} ORDER BY recorded_at DESC LIMIT ?`;
+  const sql = `SELECT * FROM meter_history ${whereSql} ORDER BY recorded_at DESC LIMIT ?`;
   params.push(Number(limit));
   const [rows] = await db.query(sql, params);
   return rows;
+};
+
+exports.deleteMeterHistoryById = async (id) => {
+  try {
+    const [res] = await db.query('DELETE FROM meter_history WHERE id = ?', [id]);
+    return res;
+  } catch (e) {
+    console.error('deleteMeterHistoryById error:', e && e.message ? e.message : e);
+    throw e;
+  }
 };
 
 exports.getAllDevices = async () => {

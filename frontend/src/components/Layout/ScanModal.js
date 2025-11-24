@@ -84,7 +84,7 @@ const ScanModal = ({ open, onClose, tenantPayload }) => {
     if (!bill || !bill.id) return;
     setLoading(true);
     try {
-      await axios.patch(`/api/bills/${bill.id}/status`, { status: 'paid' });
+  await axios.post(`/api/bills/${bill.id}/pay`, {});
       showToast('Payment updated successfully', 'success');
       setHistory(prev => prev.map(x => x.id === bill.id ? { ...x, status: 'paid' } : x));
       window.dispatchEvent(new CustomEvent('app:refresh-dashboard'));
@@ -100,9 +100,9 @@ const ScanModal = ({ open, onClose, tenantPayload }) => {
     if (selectedBills.size === 0) return showToast('No bills selected', 'info');
     const ids = Array.from(selectedBills);
     setLoading(true);
-    try {
+      try {
       for (const id of ids) {
-        try { await axios.patch(`/api/bills/${id}/status`, { status: 'paid' }); } catch (e) { console.error('Failed to mark bill', id, e); }
+        try { await axios.post(`/api/bills/${id}/pay`, {}); } catch (e) { console.error('Failed to mark bill', id, e); }
       }
       setHistory(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'paid' } : b));
       setSelectedBills(new Set());

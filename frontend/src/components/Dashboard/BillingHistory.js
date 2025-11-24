@@ -16,7 +16,7 @@ const BillingHistory = () => {
       if (tenant) q.append('tenant', tenant);
       if (from) q.append('from', from);
       if (to) q.append('to', to);
-  const res = await axios.get('/api/meter-devices/billing-history?' + q.toString());
+  const res = await axios.get('/api/meter-devices/meter-history?' + q.toString());
       setRows(res.data || []);
     } catch (e) {
       console.error('Failed to load billing history', e);
@@ -30,7 +30,7 @@ const BillingHistory = () => {
 
   return (
   <div className="container-fluid">
-      <h3>Billing History</h3>
+  <h3>Meter History</h3>
       <div className="row mb-3">
         <div className="col-md-3">
           <input className="form-control" placeholder="Tenant or Apartment" value={tenant} onChange={e => setTenant(e.target.value)} />

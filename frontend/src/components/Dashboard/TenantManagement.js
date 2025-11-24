@@ -116,9 +116,36 @@ const TenantManagement = () => {
           console.warn('Failed to refresh tenants after create', e);
         }
       }
+      // Sync tenant name into meter devices for the same apartment to keep UI in sync
+      try {
+        const aptId = created && (created.apartment_id || created.apartment || tenantForm.apartment_id);
+        const tenantName = created && created.name ? created.name : (tenantForm.name || '');
+        if (aptId && tenantName) {
+          try {
+            const devResp = await axios.get('/api/meter-devices');
+            const devList = devResp.data && devResp.data.devices ? devResp.data.devices : devResp.data || [];
+            const toUpdate = devList.filter(d => String(d.apartment_id) === String(aptId));
+            if (toUpdate.length > 0) {
+              await Promise.all(toUpdate.map(d => {
+                // If tenant_name already matches, skip
+                if ((d.tenant_name || '') === tenantName) return Promise.resolve();
+                // Preserve all fields; only update tenant_name
+                const payload = { ...d, tenant_name: tenantName };
+                return axios.put(`/api/meter-devices/${d.id}`, payload).catch(err => { console.warn('Failed to update device tenant_name', d.id, err); });
+              }));
+              try { localStorage.setItem('meterDevicesUpdated', Date.now().toString()); } catch (e) {}
+            }
+          } catch (e) {
+            console.warn('Failed to load meter devices for tenant sync', e);
+          }
+        }
+      } catch (e) {
+        console.warn('Tenant-device sync error', e);
+      }
+
       // notify other components (cross-tab) to refresh
       try { localStorage.setItem('apartmentsUpdated', Date.now().toString()); } catch (e) {}
-          setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '' });
+      setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '' });
           // close modal and notify user
           setShowModal(false);
           setSelectedTenantId(null);
@@ -216,30 +243,7 @@ const TenantManagement = () => {
               {/* Toolbar */}
               <div>
                 <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => { setModalMode('create'); setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '' }); setShowModal(true); }}>+ Add Tenant</button>
-                <button className="btn btn-sm btn-outline-primary me-2" onClick={async () => {
-                  if (selectedTenantIds.length !== 1) return showToast('Select exactly one tenant to edit', 'error');
-                  const id = selectedTenantIds[0];
-                  try {
-                    const resp = await axios.get('/api/tenants');
-                    const list = resp.data || [];
-                    const t = list.find(item => Number(item.id) === Number(id));
-                    if (!t) return showToast('Tenant not found', 'error');
-                    setModalMode('edit');
-                    setSelectedTenantId(id);
-                    setTenantForm({
-                      name: t.name || '',
-                      email: t.email || '',
-                      phone: t.phone || '',
-                      apartment_id: t.apartment_id || '',
-                      tenant_id: t.tenant_id || '',
-                      password: t.password || ''
-                    });
-                    setShowModal(true);
-                  } catch (e) {
-                    console.error('Failed to fetch tenant list for edit', e);
-                    showToast('Failed to load tenant details', 'error');
-                  }
-                }}>Edit</button>
+                {/* Removed global Edit button; per-row edit buttons added to each row for clarity */}
                 <button className="btn btn-sm btn-outline-warning me-2" onClick={async () => {
                   if (selectedTenantIds.length === 0) return showToast('Select one or more tenants to Pause/Activate', 'error');
                   // determine target status: if all paused -> activate, else pause
@@ -352,10 +356,34 @@ const TenantManagement = () => {
                             <td>{tenant.email}</td>
                             <td>{tenant.phone}</td>
                             <td>{tenant.apartment_number || 'Not assigned'}</td>
-                            <td>
+                            <td style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                               <span className={"badge " + (isPaused ? 'bg-warning text-dark' : tenant.status === 'active' ? 'bg-success' : 'bg-secondary')}>
                                 {isPaused ? 'paused' : tenant.status}
                               </span>
+                              <button type="button" title="Edit Tenant" className="btn btn-sm btn-outline-secondary" onClick={async () => {
+                                try {
+                                  const resp = await axios.get('/api/tenants');
+                                  const list = resp.data || [];
+                                  const t = list.find(item => Number(item.id) === Number(tenant.id));
+                                  if (!t) return showToast('Tenant not found', 'error');
+                                  setModalMode('edit');
+                                  setSelectedTenantId(tenant.id);
+                                  setTenantForm({
+                                    name: t.name || '',
+                                    email: t.email || '',
+                                    phone: t.phone || '',
+                                    apartment_id: t.apartment_id || '',
+                                    tenant_id: t.tenant_id || '',
+                                    password: t.password || ''
+                                  });
+                                  setShowModal(true);
+                                } catch (e) {
+                                  console.error('Failed to fetch tenant for row edit', e);
+                                  showToast('Failed to load tenant details', 'error');
+                                }
+                              }}>
+                                ✏️
+                              </button>
                             </td>
                           </tr>
                         );

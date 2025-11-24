@@ -55,6 +55,11 @@ const BillManagement = () => {
   });
   const [showHistoryDeleteConfirm, setShowHistoryDeleteConfirm] = useState(false);
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null, loading: false });
+  // Payment modal state
+  // Global toolbar paid date (date-only). Default to today.
+  const todayIso = (new Date()).toISOString().split('T')[0];
+  const [globalPaidDate, setGlobalPaidDate] = useState(todayIso);
+  const [paymentHistoryRows, setPaymentHistoryRows] = useState([]);
 
   // Filters & selection for batch actions
   const [searchText, setSearchText] = useState('');
@@ -79,6 +84,13 @@ const BillManagement = () => {
         ]);
         setTenants(tenantsRes.data);
   setBills(billsRes.data || []);
+        // load payment history for Payment History table
+        try {
+          const ph = await axios.get('/api/payment-history');
+          setPaymentHistoryRows(Array.isArray(ph.data) ? ph.data : []);
+        } catch (e) {
+          console.warn('Failed to load payment history', e);
+        }
         console.debug('BillManagement: loaded tenants', tenantsRes.data.length, 'loaded bills', billsRes.data.length);
       } catch (e) {
         console.error('Failed to load bills data', e);
@@ -105,6 +117,13 @@ const BillManagement = () => {
         // when no tenant is selected, fetch all bills instead of clearing the list
         const res = await axios.get('/api/bills');
         setBills(res.data || []);
+      }
+      // refresh payment history as well
+      try {
+        const ph = await axios.get('/api/payment-history');
+        setPaymentHistoryRows(Array.isArray(ph.data) ? ph.data : []);
+      } catch (e) {
+        console.warn('Failed to refresh payment history', e);
       }
     } catch (e) {
       console.warn('Failed to refresh bills', e);
@@ -236,7 +255,7 @@ const BillManagement = () => {
       if (selectedTenant && selectedTenant.id) q.append('tenant', selectedTenant.id);
       // fetch billing history and devices in parallel so we can infer missing meter types
       const [histRes, devRes] = await Promise.all([
-    axios.get('/api/meter-devices/billing-history?' + q.toString()),
+  axios.get('/api/meter-devices/meter-history?' + q.toString()),
     axios.get('/api/meter-devices')
       ]);
       const devices = Array.isArray(devRes.data) ? devRes.data : (devRes.data && devRes.data.devices ? devRes.data.devices : []);
@@ -339,26 +358,31 @@ const BillManagement = () => {
   };
 
   const markPaid = async (id) => {
+    // Single bill mark paid uses bulk endpoint with globalPaidDate
     try {
-  await axios.patch(`/api/bills/${id}/status`, { status: 'paid' });
-  await refreshBills();
-  showToast('Bill marked as paid!', 'success');
-    } catch (e) {
-      console.error('Update bill failed', e);
-  showToast('Failed to mark bill as paid. Please try again.', 'error');
-      try { await refreshBills(); } catch (r) { console.warn('Failed to refresh bills after failed markPaid', r); }
+      const payload = { bill_ids: [id], paid_at: globalPaidDate };
+      await axios.post('/api/bills/pay', payload);
+      await refreshBills();
+      showToast('Payment recorded.', 'success');
+    } catch (err) {
+      console.error('Mark paid failed', err);
+      showToast('Failed to record payment. Please try again.', 'error');
+      try { await refreshBills(); } catch(_){}
     }
   };
+
+  // per-bill modal removed — payments are recorded via toolbar global date and bulk endpoint
 
   const undoMarkPaid = async (id) => {
     // revert status to pending
     try {
-  await axios.patch(`/api/bills/${id}/status`, { status: 'pending' });
+  // call DELETE pay endpoint to remove payment_history
+  await axios.delete(`/api/bills/${id}/pay`);
   await refreshBills();
-  showToast('Bill status reverted to pending.', 'success');
+  showToast('Payment reverted and bill is now pending.', 'success');
     } catch (e) {
       console.error('Undo mark paid failed', e);
-  showToast('Failed to revert bill status. Please try again.', 'error');
+  showToast('Failed to revert payment. Please try again.', 'error');
       try { await refreshBills(); } catch (r) { console.warn('Failed to refresh bills after undo', r); }
     }
   };
@@ -387,12 +411,13 @@ const BillManagement = () => {
   setConfirmState({
     open: true,
     title: 'Mark Paid',
-    message: `Mark ${selectedIds.size} bill(s) as paid?`,
+  message: `Mark ${selectedIds.size} bill(s) as paid (date: ${globalPaidDate})?`,
     loading: false,
     onConfirm: async () => {
       setConfirmState(prev => ({ ...prev, loading: true }));
       try {
-        await Promise.all(Array.from(selectedIds).map(id => axios.patch(`/api/bills/${id}/status`, { status: 'paid' })));
+    const payload = { bill_ids: Array.from(selectedIds), paid_at: globalPaidDate };
+    await axios.post('/api/bills/pay', payload);
         await refreshBills();
         clearSelection();
         showToast('Marked selected bills as paid', 'success');
@@ -517,7 +542,7 @@ const BillManagement = () => {
     setShowHistoryDeleteConfirm(false);
     try {
       // attempt server-side delete (may not be supported)
-  await Promise.all(ids.map(id => axios.delete(`/api/meter-devices/billing-history/${id}`)));
+  await Promise.all(ids.map(id => axios.delete(`/api/meter-devices/meter-history/${id}`)));
       await loadBillingHistory();
       clearHistorySelection();
       showToast('Deleted history record(s)', 'success');
@@ -592,6 +617,36 @@ const BillManagement = () => {
       return 0;
     });
   }, [paidBills, searchText, dateFrom, dateTo, filterType, filterStatus, sortBy]);
+
+  // Derived payment history list (reads from paymentHistoryRows returned from /api/payment-history)
+  const filteredPaymentHistory = useMemo(() => {
+    const rows = paymentHistoryRows || [];
+    return rows.filter(ph => {
+      if (searchText) {
+        const q = searchText.toLowerCase();
+        const matchName = (ph.tenant_name||'').toLowerCase().includes(q) || String(ph.tenant_id||'').toLowerCase().includes(q);
+        const matchType = (displayBillType(ph.bill_type)||'').toLowerCase().includes(q) || (ph.bill_type||'').toLowerCase().includes(q);
+        const matchDate = ph.paid_at ? new Date(ph.paid_at).toISOString().split('T')[0].includes(q) : false;
+        if (!(matchName || matchType || matchDate)) return false;
+      }
+      if (filterType !== 'all' && canonicalizeBillType(filterType) !== ph.bill_type) return false;
+      if (dateFrom) {
+        const d = ph.paid_at ? new Date(ph.paid_at).toISOString().split('T')[0] : '';
+        if (d < dateFrom) return false;
+      }
+      if (dateTo) {
+        const d = ph.paid_at ? new Date(ph.paid_at).toISOString().split('T')[0] : '';
+        if (d > dateTo) return false;
+      }
+      return true;
+    }).sort((a,b) => {
+      const dir = sortBy.dir === 'asc' ? 1 : -1;
+      if (sortBy.field === 'due_date') return (new Date(a.paid_at).getTime() - new Date(b.paid_at).getTime()) * dir;
+      if (sortBy.field === 'tenant') return ((a.tenant_name||'').localeCompare(b.tenant_name||'')) * dir;
+      if (sortBy.field === 'amount') return (Number(a.amount_paid) - Number(b.amount_paid)) * dir;
+      return 0;
+    });
+  }, [paymentHistoryRows, searchText, dateFrom, dateTo, filterType, sortBy]);
 
   // Helper: group bills by canonical type and sort by due date DESC by default for group display
   // Group bills into only the 3 valid categories and sort by due_date DESC
@@ -734,6 +789,8 @@ const BillManagement = () => {
           </div>
         </div>
       )}
+      {/* Payment modal: choose paid date and optionally amount */}
+  {/* Per-bill payment modal removed — use the toolbar Mark Paid Date and bulk endpoints */}
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h2 className="m-0">Bill Management</h2>
       </div>
@@ -783,9 +840,11 @@ const BillManagement = () => {
           {/* Top toolbar for batch actions - compact: only Export CSV placed above Pending Bills per task */}
           <div className="d-flex justify-content-between align-items-center mb-2">
             <div>
-              <button className="btn btn-outline-secondary me-2" onClick={exportCSV}>Export CSV</button>
-              <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>Create Bills</button>
-            </div>
+                <button className="btn btn-outline-secondary me-2" onClick={exportCSV}>Export CSV</button>
+                <button className="btn btn-primary me-2" onClick={() => setShowCreateModal(true)}>Create Bills</button>
+                <label className="me-2 small">Mark Paid Date:</label>
+                <input type="date" className="form-control d-inline-block" style={{ width: 180 }} value={globalPaidDate} onChange={(e) => setGlobalPaidDate(e.target.value)} />
+              </div>
             <div>
               <label className="me-2 small">Sort:</label>
               <select className="form-select d-inline-block" style={{ width: 180 }} value={`${sortBy.field}:${sortBy.dir}`} onChange={(e) => { const [f,d] = e.target.value.split(':'); setSortBy({ field: f, dir: d }); }}>
@@ -811,12 +870,12 @@ const BillManagement = () => {
                 setConfirmState({
                   open: true,
                   title: 'Mark Paid',
-                  message: `Mark ${ids.length} bill(s) as paid?`,
+                  message: `Mark ${ids.length} bill(s) as paid (date: ${globalPaidDate})?`,
                   loading: false,
                   onConfirm: async () => {
                     setConfirmState(prev => ({ ...prev, loading: true }));
                     try {
-                      await Promise.all(ids.map(id => axios.patch(`/api/bills/${id}/status`, { status: 'paid' })));
+                      await axios.post('/api/bills/pay', { bill_ids: ids, paid_at: globalPaidDate });
                       refreshBills(); clearSelection(); showToast('Marked as paid', 'success');
                     } catch (e) {
                       refreshBills(); showToast('Failed to mark some bills', 'error');
@@ -825,14 +884,8 @@ const BillManagement = () => {
                   }
                 });
               }}>Mark Paid</button>
-              <button className="btn btn-outline-primary btn-sm" onClick={() => {
-                const ids = Array.from(selectedIds);
-                if (ids.length === 0) return showToast('Select one bill to edit', 'info');
-                if (ids.length > 1) return showToast('Please select only one bill to edit', 'info');
-                const bill = bills.find(b => b.id === ids[0]);
-                if (!bill) return showToast('Selected bill not found', 'error');
-                setEditingBill(bill); setEditForm({ bill_type: displayBillType(bill.bill_type), amount: String(bill.amount), due_date: bill.due_date || '' });
-              }}>Edit</button>
+            </div>
+            <div className="btn-group">
               <button className="btn btn-outline-danger btn-sm" onClick={() => {
                 const ids = Array.from(selectedIds);
                 if (ids.length === 0) return showToast('Select at least one bill', 'info');
@@ -888,7 +941,7 @@ const BillManagement = () => {
                       ) : (
                         <div className="table-responsive">
                           <table className="table table-striped table-hover">
-                            <thead>
+                              <thead>
                               <tr>
                                 <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
                                 <th>Tenant</th>
@@ -896,6 +949,7 @@ const BillManagement = () => {
                                 <th>Amount</th>
                                 <th>Due Date</th>
                                 <th>Status</th>
+                                <th style={{ width: 56, textAlign: 'center' }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -905,12 +959,24 @@ const BillManagement = () => {
                                 return (
                                   <tr key={bill.id} className="bill-row" style={{ background: tenantPaused ? '#f8f9fa' : 'transparent', color: tenantPaused ? '#6c757d' : 'inherit' }}>
                                     <td>{tenantPaused ? <input type="checkbox" disabled /> : <input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} />}</td>
-                                    <td><span className="bill-row-icon">{icon}</span>{bill.tenant_name || bill.tenant_id}</td>
+                                    <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span className="bill-row-icon">{icon}</span>
+                                      <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
+                                    </td>
                                     <td>{displayBillType(bill.bill_type)}</td>
                                     <td>{formatMeterNumber(bill.amount)}</td>
                                     <td>{bill.due_date ? new Date(bill.due_date).toLocaleDateString() : ''}</td>
                                     <td>
                                       <span className={`status-badge ${statusClass}`}>{tenantPaused ? 'paused' : bill.status}</span>
+                                    </td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button title="Edit" aria-label={`Edit bill ${bill.id}`} className="edit-icon" onClick={() => {
+                                          if (tenantPaused) return;
+                                          setEditingBill(bill); setEditForm({ bill_type: displayBillType(bill.bill_type), amount: String(bill.amount), due_date: bill.due_date || '' });
+                                        }}>
+                                        ✏️
+                                        <span className="visually-hidden">Edit</span>
+                                      </button>
                                     </td>
                                   </tr>
                                 );
@@ -931,7 +997,7 @@ const BillManagement = () => {
       {/* Paid Bills grouped by type */}
       <div className="card mb-5">
         <div className="card-header d-flex justify-content-between align-items-center">
-          <div>Paid Bills</div>
+          <div>Payment History</div>
           <div className="btn-toolbar">
             <div className="btn-group me-2">
               <button className="btn btn-warning btn-sm" onClick={() => {
@@ -945,7 +1011,7 @@ const BillManagement = () => {
                   onConfirm: async () => {
                     setConfirmState(prev => ({ ...prev, loading: true }));
                     try {
-                      await Promise.all(ids.map(id => axios.patch(`/api/bills/${id}/status`, { status: 'pending' })));
+                      await axios.post('/api/bills/unpay', { bill_ids: ids });
                       refreshBills(); clearSelection(); showToast('Reverted', 'success');
                     } catch (e) {
                       refreshBills(); showToast('Failed to revert some bills', 'error');
@@ -954,14 +1020,8 @@ const BillManagement = () => {
                   }
                 });
               }}>Unpaid</button>
-              <button className="btn btn-outline-primary btn-sm" onClick={() => {
-                const ids = Array.from(selectedIds);
-                if (ids.length === 0) return showToast('Select one bill to edit', 'info');
-                if (ids.length > 1) return showToast('Please select only one bill to edit', 'info');
-                const bill = bills.find(b => b.id === ids[0]);
-                if (!bill) return showToast('Selected bill not found', 'error');
-                setEditingBill(bill); setEditForm({ bill_type: displayBillType(bill.bill_type), amount: String(bill.amount), due_date: bill.due_date || '' });
-              }}>Edit</button>
+            </div>
+            <div className="btn-group">
               <button className="btn btn-outline-danger btn-sm" onClick={() => {
                 const ids = Array.from(selectedIds);
                 if (ids.length === 0) return showToast('Select at least one bill', 'info');
@@ -991,7 +1051,16 @@ const BillManagement = () => {
           ) : (
             <div>
               {(() => {
-                const groups = groupAndSort(filteredPaid);
+                const groups = groupAndSort(filteredPaymentHistory.map(ph => ({
+                  id: ph.bill_id,
+                  // Prefer tenant name from tenants cache; fall back to any tenant_name on ph or tenant_id
+                  tenant_name: (tenants && Array.isArray(tenants) ? (tenants.find(t => String(t.id) === String(ph.tenant_id)) || {}).name : null) || ph.tenant_name || ph.tenant_id,
+                  bill_type: ph.bill_type,
+                  amount: Number(ph.amount_paid || ph.amount || 0),
+                  due_date: ph.due_date || ph.paid_at || '',
+                  payment_paid_at: ph.paid_at,
+                  status: 'paid'
+                })));
                 const order = ['rent','water','electricity'];
                 return order.map(key => {
                   const list = groups[key] || [];
@@ -1022,8 +1091,9 @@ const BillManagement = () => {
                                 <th>Tenant</th>
                                 <th>Type</th>
                                 <th>Amount</th>
-                                <th>Due Date</th>
+                                <th>Paid Date</th>
                                 <th>Status</th>
+                                <th style={{ width: 56, textAlign: 'center' }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1033,11 +1103,24 @@ const BillManagement = () => {
                                 return (
                                   <tr key={bill.id} className="bill-row" style={{ background: tenantPaused ? '#f8f9fa' : 'transparent', color: tenantPaused ? '#6c757d' : 'inherit' }}>
                                     <td>{tenantPaused ? <input type="checkbox" disabled /> : <input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} />}</td>
-                                    <td><span className="bill-row-icon">{icon}</span>{bill.tenant_name || bill.tenant_id}</td>
+                                    <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                      <span className="bill-row-icon">{icon}</span>
+                                      <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
+                                    </td>
                                     <td>{displayBillType(bill.bill_type)}</td>
                                     <td>{formatMeterNumber(bill.amount)}</td>
-                                    <td>{bill.due_date ? new Date(bill.due_date).toLocaleDateString() : ''}</td>
+                                    <td>{bill.payment_paid_at ? new Date(bill.payment_paid_at).toLocaleDateString() : ''}</td>
                                     <td><span className={`status-badge ${statusClass}`}>{tenantPaused ? 'paused' : bill.status}</span></td>
+                                    <td style={{ textAlign: 'center' }}>
+                                      <button title="Edit" aria-label={`Edit bill ${bill.id}`} className="edit-icon" onClick={() => {
+                                          if (tenantPaused) return;
+                                          const b = bills.find(x => x.id === bill.id) || bill;
+                                          setEditingBill(b); setEditForm({ bill_type: displayBillType(b.bill_type), amount: String(b.amount), due_date: b.due_date || '' });
+                                        }}>
+                                        ✏️
+                                        <span className="visually-hidden">Edit</span>
+                                      </button>
+                                    </td>
                                   </tr>
                                 );
                               })}
@@ -1054,13 +1137,12 @@ const BillManagement = () => {
         </div>
       </div>
 
-      {/* Billing History section (Meter device updates) - grouped by meter type */}
+  {/* Meter History section (Meter device updates) - grouped by meter type */}
       <div className="card mb-5">
         <div className="card-header d-flex justify-content-between align-items-center">
-          <div>Billing History</div>
+          <div>Meter History</div>
           <div className="d-flex align-items-center">
             <div className="btn-group me-2">
-              <button className="btn btn-outline-primary btn-sm" onClick={openHistoryEdit}>Edit</button>
               <button className="btn btn-outline-danger btn-sm" onClick={confirmHistoryDelete}>Delete</button>
             </div>
             <button className="btn btn-sm btn-outline-secondary" onClick={loadBillingHistory}>{historyLoading ? 'Loading...' : 'Refresh'}</button>
@@ -1114,13 +1196,17 @@ const BillManagement = () => {
                                 <th>Rate</th>
                                 <th>Total Cost</th>
                                 <th>Updated</th>
+                                <th style={{ width: 56, textAlign: 'center' }}>Actions</th>
                               </tr>
                             </thead>
                             <tbody>
                               {visible.map(r => (
                                 <tr key={r.id} className="bill-row">
                                   <td><input type="checkbox" checked={selectedHistoryIds.has(r.id)} onChange={() => toggleHistorySelect(r.id)} /></td>
-                                  <td><span className="bill-row-icon">{key === 'electricity' ? '⚡' : '💧'}</span>{r.tenant_name}</td>
+                                  <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <span className="bill-row-icon">{key === 'electricity' ? '⚡' : '💧'}</span>
+                                    <span style={{ flex: 1 }}>{r.tenant_name}</span>
+                                  </td>
                                   <td>{r.apartment_number || r.apartment_id}</td>
                                   <td>{friendlyHistoryType(r)}</td>
                                   <td>{r.previous_reading != null ? formatMeterNumber(r.previous_reading) : ''}</td>
@@ -1129,6 +1215,25 @@ const BillManagement = () => {
                                   <td>{r.rate != null ? formatMeterNumber(r.rate) : ''}</td>
                                   <td>{r.total_cost != null ? formatMeterNumber(r.total_cost) : ''}</td>
                                   <td>{r.recorded_at ? new Date(r.recorded_at).toLocaleString() : (r.updated_at ? new Date(r.updated_at).toLocaleString() : '')}</td>
+                                  <td style={{ textAlign: 'center' }}>
+                                    <button title="Edit" aria-label={`Edit history ${r.id}`} className="edit-icon" onClick={() => {
+                                      setHistoryEditRow(r);
+                                      setHistoryEditForm({
+                                        tenant_name: r.tenant_name || '',
+                                        apartment_number: r.apartment_number || '',
+                                        meter_type: r.meter_type || r.type || '',
+                                        previous_reading: r.previous_reading !== null && r.previous_reading !== undefined ? String(r.previous_reading) : '',
+                                        present_reading: r.present_reading !== null && r.present_reading !== undefined ? String(r.present_reading) : '',
+                                        consumption: r.consumption !== null && r.consumption !== undefined ? String(r.consumption) : '',
+                                        rate: r.rate !== null && r.rate !== undefined ? String(r.rate) : '',
+                                        total_cost: r.total_cost !== null && r.total_cost !== undefined ? String(r.total_cost) : '',
+                                        recorded_at: r.recorded_at || r.updated_at || ''
+                                      });
+                                    }}>
+                                      ✏️
+                                      <span className="visually-hidden">Edit</span>
+                                    </button>
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1147,7 +1252,7 @@ const BillManagement = () => {
       {/* History Edit Modal (centered, small) */}
       {historyEditRow && (
         <div className="modal d-block" tabIndex="-1" role="dialog" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => { setHistoryEditRow(null); }}>
-          <div className="modal-dialog modal-sm modal-dialog-centered" role="document" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-dialog modal-lg modal-dialog-centered" role="document" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 960 }}>
             <div className="modal-content">
               <div className="modal-header">
                 <h5 className="modal-title">Edit Billing Record</h5>
@@ -1155,71 +1260,77 @@ const BillManagement = () => {
               </div>
               <form onSubmit={saveHistoryEdit}>
                 <div className="modal-body">
-                  <div className="mb-2">
-                    <label className="form-label small">Tenant</label>
-                    <input className="form-control" value={historyEditForm.tenant_name} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, tenant_name: e.target.value }))} />
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Apartment</label>
-                    <input className="form-control" value={historyEditForm.apartment_number} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, apartment_number: e.target.value }))} />
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Type</label>
-                    <select className="form-select" value={historyEditForm.meter_type} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, meter_type: e.target.value }))}>
-                      <option value="water_meter">Water</option>
-                      <option value="electricity_meter">Electricity</option>
-                    </select>
-                  </div>
                   <div className="row">
-                    <div className="col-6 mb-2">
-                      <label className="form-label small">Previous</label>
-                      <input type="number" step="0.001" className="form-control" value={historyEditForm.previous_reading} onChange={(e) => {
-                        const v = e.target.value; setHistoryEditForm(prev => {
-                          const present = Number(prev.present_reading || 0);
-                          const previous = Number(v || 0);
-                          const consumption = Number((present - previous).toFixed(3));
-                          const rate = Number(prev.rate || 0);
-                          const total = Number((consumption * rate).toFixed(2));
-                          return { ...prev, previous_reading: v, consumption: String(consumption), total_cost: String(total) };
-                        });
-                      }} />
+                    <div className="col-md-6">
+                      <div className="mb-2">
+                        <label className="form-label small">Tenant</label>
+                        <input className="form-control" value={historyEditForm.tenant_name} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, tenant_name: e.target.value }))} />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label small">Apartment</label>
+                        <input className="form-control" value={historyEditForm.apartment_number} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, apartment_number: e.target.value }))} />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label small">Type</label>
+                        <select className="form-select" value={historyEditForm.meter_type} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, meter_type: e.target.value }))}>
+                          <option value="water_meter">Water</option>
+                          <option value="electricity_meter">Electricity</option>
+                        </select>
+                      </div>
+                      <div className="row">
+                        <div className="col-6 mb-2">
+                          <label className="form-label small">Previous</label>
+                          <input type="number" step="0.001" className="form-control" value={historyEditForm.previous_reading} onChange={(e) => {
+                            const v = e.target.value; setHistoryEditForm(prev => {
+                              const present = Number(prev.present_reading || 0);
+                              const previous = Number(v || 0);
+                              const consumption = Number((present - previous).toFixed(3));
+                              const rate = Number(prev.rate || 0);
+                              const total = Number((consumption * rate).toFixed(2));
+                              return { ...prev, previous_reading: v, consumption: String(consumption), total_cost: String(total) };
+                            });
+                          }} />
+                        </div>
+                        <div className="col-6 mb-2">
+                          <label className="form-label small">Present</label>
+                          <input type="number" step="0.001" className="form-control" value={historyEditForm.present_reading} onChange={(e) => {
+                            const v = e.target.value; setHistoryEditForm(prev => {
+                              const previous = Number(prev.previous_reading || 0);
+                              const present = Number(v || 0);
+                              const consumption = Number((present - previous).toFixed(3));
+                              const rate = Number(prev.rate || 0);
+                              const total = Number((consumption * rate).toFixed(2));
+                              return { ...prev, present_reading: v, consumption: String(consumption), total_cost: String(total) };
+                            });
+                          }} />
+                        </div>
+                      </div>
                     </div>
-                    <div className="col-6 mb-2">
-                      <label className="form-label small">Present</label>
-                      <input type="number" step="0.001" className="form-control" value={historyEditForm.present_reading} onChange={(e) => {
-                        const v = e.target.value; setHistoryEditForm(prev => {
-                          const previous = Number(prev.previous_reading || 0);
-                          const present = Number(v || 0);
-                          const consumption = Number((present - previous).toFixed(3));
-                          const rate = Number(prev.rate || 0);
-                          const total = Number((consumption * rate).toFixed(2));
-                          return { ...prev, present_reading: v, consumption: String(consumption), total_cost: String(total) };
-                        });
-                      }} />
+                    <div className="col-md-6">
+                      <div className="mb-2">
+                        <label className="form-label small">Rate</label>
+                        <input type="number" step="0.01" className="form-control" value={historyEditForm.rate} onChange={(e) => {
+                          const v = e.target.value; setHistoryEditForm(prev => {
+                            const rate = Number(v || 0);
+                            const consumption = Number(prev.consumption || 0);
+                            const total = Number((consumption * rate).toFixed(2));
+                            return { ...prev, rate: v, total_cost: String(total) };
+                          });
+                        }} />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label small">Consumption</label>
+                        <input type="number" step="0.001" className="form-control" value={historyEditForm.consumption} disabled />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label small">Total Cost</label>
+                        <input type="number" step="0.01" className="form-control" value={historyEditForm.total_cost} disabled />
+                      </div>
+                      <div className="mb-2">
+                        <label className="form-label small">Updated</label>
+                        <input type="datetime-local" className="form-control" value={historyEditForm.recorded_at ? new Date(historyEditForm.recorded_at).toISOString().slice(0,19) : ''} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, recorded_at: e.target.value }))} />
+                      </div>
                     </div>
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Rate</label>
-                    <input type="number" step="0.01" className="form-control" value={historyEditForm.rate} onChange={(e) => {
-                      const v = e.target.value; setHistoryEditForm(prev => {
-                        const rate = Number(v || 0);
-                        const consumption = Number(prev.consumption || 0);
-                        const total = Number((consumption * rate).toFixed(2));
-                        return { ...prev, rate: v, total_cost: String(total) };
-                      });
-                    }} />
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Consumption</label>
-                    <input type="number" step="0.001" className="form-control" value={historyEditForm.consumption} disabled />
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Total Cost</label>
-                    <input type="number" step="0.01" className="form-control" value={historyEditForm.total_cost} disabled />
-                  </div>
-                  <div className="mb-2">
-                    <label className="form-label small">Updated</label>
-                    <input type="datetime-local" className="form-control" value={historyEditForm.recorded_at ? new Date(historyEditForm.recorded_at).toISOString().slice(0,19) : ''} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, recorded_at: e.target.value }))} />
                   </div>
                 </div>
                 <div className="modal-footer">

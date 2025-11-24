@@ -306,7 +306,7 @@ const TenantDashboard = () => {
         <div className="col-md-6 mb-4">
           <div className="card">
             <div className="card-header">
-              <h5>Billing History</h5>
+              <h5>Meter History</h5>
             </div>
             <div className="card-body">
               {billingHistory().length === 0 ? (

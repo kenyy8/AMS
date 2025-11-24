@@ -25,3 +25,37 @@ export function formatMeterNumber(v) {
 }
 
 export default formatMeterNumber;
+
+// Format currency for display with rules:
+// - Prefix with ₱
+// - Include comma separators for thousands
+// - Remove trailing ".00" for integer values (e.g., 1466.00 -> ₱1,466)
+// - Keep decimal places only if non-zero (e.g., 14.50 -> ₱14.5)
+export function formatCurrencyPeso(v) {
+  if (v === null || v === undefined || v === '') return '';
+  const num = Number(v);
+  if (Number.isNaN(num)) return String(v);
+
+  // If integer value (or effectively integer like 1466.00), format without decimals
+  if (Number.isInteger(num)) {
+    return `₱${num.toLocaleString()}`;
+  }
+
+  // For non-integers: build a string that trims trailing zeros
+  // Use a fixed representation avoiding exponential notation
+  let s = typeof v === 'string' ? v.trim() : String(num);
+  // Ensure numeric string from Number if input was something like '1e+3'
+  if (!s.includes('.') && String(num).includes('.')) s = String(num);
+
+  // Trim trailing zeros after decimal, then trim trailing dot
+  s = s.replace(/(\.\d*?[1-9])0+$/,'$1');
+  s = s.replace(/\.0+$/,'');
+
+  // Insert comma separators for integer part
+  if (s.includes('.')) {
+    const [intPart, decPart] = s.split('.');
+    return `₱${Number(intPart).toLocaleString()}.${decPart}`;
+  }
+
+  return `₱${Number(s).toLocaleString()}`;
+}

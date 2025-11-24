@@ -8,3 +8,14 @@
 .mdm-group-title { margin: 0 0 0.5rem 0; font-weight: 600; }
 .mdm-card-header { display:flex; align-items:center; justify-content:space-between; }
 .mdm-rate-small { font-size: 13px; color: #333; }
+
+/* Icon button for compact action icons in tables */
+.mdm-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 30px;
+	padding: 0;
+}
+.mdm-icon-btn span { font-size: 14px; line-height: 1; }

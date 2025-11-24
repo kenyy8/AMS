@@ -84,9 +84,9 @@ exports.updateReading = async (req, res) => {
       throw innerErr;
     }
 
-    // persist billing history (best-effort)
+    // persist meter history (best-effort) - only records meter readings history
     try {
-  await MeterDevices.insertBillingHistory({
+      await MeterDevices.insertMeterHistory({
         tenant_name: history.tenant_name,
         apartment_number: history.apartment_number,
         device_id: history.device_id,
@@ -94,12 +94,12 @@ exports.updateReading = async (req, res) => {
         previous_reading: history.previous_reading,
         present_reading: history.present_reading,
         consumption: history.consumption,
-  rate: history.rate,
+        rate: history.rate,
         total_cost: history.total_cost,
         recorded_at: new Date()
       });
     } catch (hbErr) {
-      console.error('Failed to insert billing history:', hbErr);
+      console.error('Failed to insert meter history:', hbErr);
       // continue even if history insert fails
     }
 
@@ -118,6 +118,24 @@ exports.getBillingHistory = async (req, res) => {
   } catch (e) {
     console.error('getBillingHistory error:', e);
     return res.status(500).json({ message: 'Failed to fetch billing history' });
+  }
+};
+
+// Delete a meter history row by id
+exports.deleteMeterHistory = async (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ message: 'id required' });
+    try {
+      await MeterDevices.deleteMeterHistoryById(id);
+      return res.json({ message: 'Deleted' });
+    } catch (dbErr) {
+      console.error('Failed to delete meter history:', dbErr);
+      return res.status(500).json({ message: 'Failed to delete meter history' });
+    }
+  } catch (e) {
+    console.error('deleteMeterHistory error:', e);
+    return res.status(500).json({ message: 'Failed to delete meter history' });
   }
 };
 

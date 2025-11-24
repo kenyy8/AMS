@@ -35,23 +35,14 @@ const Reports = () => {
   // show all data by default (no selection controls)
   const [expanded, setExpanded] = useState(null); // null or { type, data, title }
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        // prefer server-side aggregation endpoints for performance
-        const res = await axios.get('/api/bills');
-        setBills(res.data || []);
-      } catch (e) {
-        console.error('Failed to load bills for reports', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
+  // initial load will be handled by calling the existing `reload` helper on mount
 
-  // date range selection (default: start of month -> today)
-  const [startDate, setStartDate] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0,10); });
+  // date range selection (default: Jan 1 of current year -> today)
+  const [startDate, setStartDate] = useState(() => {
+    const now = new Date();
+    const jan1 = new Date(now.getFullYear(), 0, 1);
+    return jan1.toISOString().slice(0,10);
+  });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0,10));
 
   const filtered = useMemo(() => {
@@ -69,14 +60,74 @@ const Reports = () => {
   const reload = async () => {
     setLoading(true);
     try {
-      const res = await axios.get('/api/bills');
-      setBills(res.data || []);
+      // Fetch paid rows from reports endpoint (which uses payment_history filtered by paid_at)
+      // and fetch pending rows directly from the Bill Management source (/api/bills)
+      const params = {};
+      if (startDate && endDate) {
+        params.startDate = startDate;
+        params.endDate = endDate;
+      }
+      // no tenant filter by default (could be extended later)
+      const [reportsRes, billsRes] = await Promise.all([
+        axios.get('/api/reports/bills', { params }),
+        axios.get('/api/bills')
+      ]);
+
+      const reports = Array.isArray(reportsRes.data) ? reportsRes.data : [];
+      const allBills = Array.isArray(billsRes.data) ? billsRes.data : [];
+
+      // Paid rows: authoritative from reports (payment_history)
+      const paidRows = reports.filter(r => r.payment_history_id).map(r => ({
+        id: r.bill_id || r.id,
+        bill_id: r.bill_id || r.id,
+        tenant_id: r.tenant_id,
+        tenant_name: r.tenant_name,
+        bill_type: r.bill_type,
+        amount: Number(r.amount) || 0,
+        due_date: r.due_date || r.paid_at || null,
+        status: 'paid',
+        payment_history_id: r.payment_history_id
+      }));
+
+      // Pending rows: use Bill Management source exactly (b.status !== 'paid')
+      let pendingRows = allBills.filter(b => (b.status || '').toString().toLowerCase() !== 'paid');
+      // apply date range filter client-side for pending rows using due_date
+      if (startDate && endDate) {
+        const s = new Date(startDate);
+        const e = new Date(endDate);
+        e.setHours(23,59,59,999);
+        pendingRows = pendingRows.filter(b => {
+          if (!b.due_date) return false;
+          const d = new Date(b.due_date);
+          return d >= s && d <= e;
+        });
+      }
+      pendingRows = pendingRows.map(b => ({
+        id: b.id,
+        bill_id: b.id,
+        tenant_id: b.tenant_id,
+        tenant_name: b.tenant_name || b.tenantName || null,
+        bill_type: b.bill_type,
+        amount: Number(b.amount) || 0,
+        due_date: b.due_date || null,
+        status: 'pending'
+      }));
+
+      // Combine paid (from payment_history) and pending (from /api/bills)
+      const combined = paidRows.concat(pendingRows);
+      setBills(combined);
     } catch (e) {
       console.error('Failed to reload bills', e);
     } finally {
       setLoading(false);
     }
   };
+
+  // Call reload on mount so the page shows results with the new default date range
+  useEffect(() => {
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Prepare chart data for full dataset (hierarchical view)
   const summaryTotals = useMemo(() => {
@@ -168,7 +219,7 @@ const Reports = () => {
     // build CSV from filtered bills
     if (!filtered || filtered.length === 0) return showToast('No data to export', 'info');
     const rows = [['id','tenant_id','bill_type','amount','due_date','status']];
-  filtered.forEach(b => rows.push([b.id,b.tenant_id,displayBillType(b.bill_type),b.amount,b.due_date,b.status]));
+  filtered.forEach(b => rows.push([b.bill_id || b.id,b.tenant_id,displayBillType(b.bill_type),b.amount,b.due_date,b.status]));
     const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
