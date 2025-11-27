@@ -8,7 +8,7 @@ import { formatMeterNumber, formatCurrencyPeso } from '../../utils/numberFormat'
 import '../../components/Dashboard/dashboard.css';
 
 // Chart.js via react-chartjs-2 (chart.js already in package.json)
-import { Line } from 'react-chartjs-2';
+import { Line, Doughnut } from 'react-chartjs-2';
 import {
 	Chart as ChartJS,
 	CategoryScale,
@@ -19,8 +19,10 @@ import {
 	Tooltip,
 	Legend,
 } from 'chart.js';
+import { ArcElement } from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
+ChartJS.register(ArcElement);
 
 // Clean, single-component Property Manager Dashboard
 // - Summary cards on top
@@ -34,6 +36,7 @@ const PropertyManagerDashboard = () => {
 	const [monthlyLabel, setMonthlyLabel] = useState('');
 	const [monthlyTotal, setMonthlyTotal] = useState(0);
 		const [stats, setStats] = useState({ totalTenants: 0, totalApartments: 0, occupiedApartments: 0, overdueBills: 0, totalRevenue: 0, rentIncome: 0, utilityCollections: 0 });
+		const [tenantsData, setTenantsData] = useState([]);
 	const [allBills, setAllBills] = useState([]);
 	const [monthlyPayments, setMonthlyPayments] = useState([]);
 	const [recentBills, setRecentBills] = useState([]);
@@ -421,8 +424,61 @@ const PropertyManagerDashboard = () => {
 	// Action center metrics
 	const overdueCount = allBills.filter(b => !isPaid(b) && isOverdueByRule(b)).length;
 	const now = new Date();
-	const expiringLeases = []; // derive from tenants when available; placeholder
 	const latePayersCount = allBills.filter(b => !isPaid(b) && b.due_date && (new Date(b.due_date) < now)).length;
+
+	// Payment Status doughnut data (Paid vs Unpaid)
+	const paidCount = allBills.filter(b => isPaid(b)).length + monthlyPayments.filter(p => Number(p.amount_paid || 0) > 0).length;
+	const unpaidCount = Math.max(0, allBills.length - paidCount);
+
+	const paymentStatusData = {
+		labels: ['Paid', 'Unpaid'],
+		datasets: [{ data: [paidCount, unpaidCount], backgroundColor: ['#2ecc71', '#e74c3c'] }]
+	};
+
+	// Occupancy trend: build monthly occupancy series (occupied vs vacant)
+	const occupancyLabels = [];
+	const occupancySeries = [];
+	try {
+		// derive last 6 months
+		const months = 6;
+		const nowDate = new Date();
+		for (let i = months - 1; i >= 0; i--) {
+			const dt = new Date(nowDate.getFullYear(), nowDate.getMonth() - i, 1);
+			occupancyLabels.push(dt.toLocaleString(undefined, { month: 'short', year: 'numeric' }));
+			// best-effort: use stats.occupiedApartments as current point; historical data unavailable -> repeat current
+			occupancySeries.push(stats.occupiedApartments || 0);
+		}
+	} catch (e) { /* ignore */ }
+
+	const occupancyData = {
+		labels: occupancyLabels,
+		datasets: [{ label: 'Occupied', data: occupancySeries, borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.05)', fill: true, tension: 0.3 }]
+	};
+
+	// Tenant growth: try to compute monthly tenant counts from tenantsData if available
+	const tenantLabels = [];
+	const tenantSeries = [];
+	if (Array.isArray(tenantsData) && tenantsData.length > 0) {
+		// assume tenantsData contains created_at timestamps; bucket by month for last 6 months
+		const months = 6;
+		const nowDate = new Date();
+		for (let i = months - 1; i >= 0; i--) {
+			const dt = new Date(nowDate.getFullYear(), nowDate.getMonth() - i, 1);
+			const start = new Date(dt.getFullYear(), dt.getMonth(), 1);
+			const end = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
+			const count = tenantsData.filter(t => {
+				const d = new Date(t.created_at || t.createdAt || t.joined_at || t.joinedAt || 0);
+				return !isNaN(d) && d >= start && d < end;
+			}).length;
+			tenantLabels.push(dt.toLocaleString(undefined, { month: 'short', year: 'numeric' }));
+			tenantSeries.push(count);
+		}
+	}
+
+	const tenantGrowthData = {
+		labels: tenantLabels.length ? tenantLabels : occupancyLabels,
+		datasets: [{ label: 'New Tenants', data: tenantSeries.length ? tenantSeries : occupancySeries.map(() => 0), borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.05)', fill: true, tension: 0.3 }]
+	};
 
 	return (
 		<div className="manager-dashboard">
@@ -511,7 +567,9 @@ const PropertyManagerDashboard = () => {
 								<div className="small text-muted">Payment Status</div>
 								<button className="btn btn-sm btn-outline-secondary">Expand</button>
 							</div>
-							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Payment status breakdown</div>
+							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center">
+								{(allBills.length === 0 && monthlyPayments.length === 0) ? <div className="text-muted">No data available</div> : <Doughnut data={paymentStatusData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />}
+							</div>
 						</div>
 					</div>
 					<div className="col-12 col-md-6 col-lg-3 mb-3">
@@ -520,7 +578,9 @@ const PropertyManagerDashboard = () => {
 								<div className="small text-muted">Occupancy Trend</div>
 								<button className="btn btn-sm btn-outline-secondary">Expand</button>
 							</div>
-							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Occupancy trend</div>
+							<div style={{ height: 120 }}>
+								{(occupancySeries.length === 0) ? <div className="text-muted text-center">No data available</div> : <Line data={occupancyData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }} />}
+							</div>
 						</div>
 					</div>
 					<div className="col-12 col-md-6 col-lg-3 mb-3">
@@ -529,7 +589,9 @@ const PropertyManagerDashboard = () => {
 								<div className="small text-muted">Tenant Growth</div>
 								<button className="btn btn-sm btn-outline-secondary">Expand</button>
 							</div>
-							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Tenant growth</div>
+							<div style={{ height: 120 }}>
+								{(tenantSeries.length === 0) ? <div className="text-muted text-center">No data available</div> : <Line data={tenantGrowthData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }} />}
+							</div>
 						</div>
 					</div>
 				</div>
@@ -549,15 +611,7 @@ const PropertyManagerDashboard = () => {
 										<button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/bill-management?filter=overdue')}>View</button>
 									</div>
 								</div>
-								<div className="pm-action-item d-flex justify-content-between align-items-center p-2" style={{ borderBottom: '1px solid #eee' }}>
-									<div>
-										<div className="text-muted small">Expiring Leases (30d)</div>
-										<div className="h5">{expiringLeases.length}</div>
-									</div>
-									<div>
-										<button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/tenant-management?filter=expiring')}>View</button>
-									</div>
-								</div>
+								{/* Expiring leases removed per redesign request */}
 								<div className="pm-action-item d-flex justify-content-between align-items-center p-2">
 									<div>
 										<div className="text-muted small">Late Payers</div>
