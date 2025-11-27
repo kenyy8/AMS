@@ -551,7 +551,7 @@ app.get('/api/qr-tokens/:id', (req, res) => {
 // Patch status endpoint to accept paused/pending/paid
 app.patch('/api/bills/:id/status', (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status } = req.body || {};
   if (status === 'pending') {
     // revert payment: delete any payment_history rows and set bill to pending
     db.query('DELETE FROM payment_history WHERE bill_id = ?', [id], (delErr) => {
@@ -587,7 +587,11 @@ app.patch('/api/bills/:id/status', (req, res) => {
           return res.status(409).json({ message: 'Payment history already exists for this bill' });
         }
         // insert payment record using bill.amount and NOW()
-        db.query('INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, NOW())', [id, bill.amount || 0], (insErr, insRes) => {
+  // determine payment_type: rent vs utility
+  const providedType = (req.body && (req.body.payment_type || req.body.paymentType)) ? String(req.body.payment_type || req.body.paymentType).toUpperCase() : null;
+  const inferred = (bill.bill_type || '').toString().toLowerCase().includes('water') || (bill.bill_type || '').toString().toLowerCase().includes('electric') ? 'UTILITY' : 'RENT';
+  const pt = providedType || inferred;
+  db.query('INSERT INTO payment_history (bill_id, amount_paid, paid_at, payment_type) VALUES (?, ?, NOW(), ?)', [id, bill.amount || 0, pt], (insErr, insRes) => {
           if (insErr) {
             console.error('PATCH /api/bills/:id/status - insert payment_history error:', insErr);
             return res.status(500).json({ message: 'Failed to record payment', error: insErr.message });
@@ -852,7 +856,7 @@ app.get('/api/bills', (req, res) => {
 // Mark bill as paid: creates payment_history entry (only if not already paid via payment_history)
 app.post('/api/bills/:id/pay', (req, res) => {
   const { id } = req.params;
-  let { amount_paid, paid_at } = req.body;
+  let { amount_paid, paid_at, payment_type } = req.body || {};
   amount_paid = amount_paid !== undefined ? amount_paid : null;
   // default paid_at to NOW() when not provided
   const paidAtSql = paid_at ? '?': 'NOW()';
@@ -870,8 +874,12 @@ app.post('/api/bills/:id/pay', (req, res) => {
       // if amount_paid not provided, fall back to bill amount
       const amtPromise = new Promise((resolve) => { if (amount_paid !== null) return resolve(amount_paid); return resolve(bRows[0].amount || 0); });
       amtPromise.then((amt) => {
-        const insertSql = `INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, ${paidAtSql})`;
-        const params = paid_at ? [id, amt, paid_at] : [id, amt];
+  // determine payment_type: prefer provided payment_type, else infer from bill_type
+  const billType = (bRows[0].bill_type || '').toString().toLowerCase();
+  const inferredType = (billType.includes('water') || billType.includes('electric')) ? 'UTILITY' : 'RENT';
+  const paymentType = payment_type ? String(payment_type).toUpperCase() : inferredType;
+  const insertSql = `INSERT INTO payment_history (bill_id, amount_paid, paid_at, payment_type) VALUES (?, ?, ${paidAtSql}, ?)`;
+  const params = paid_at ? [id, amt, paid_at, paymentType] : [id, amt, paymentType];
         db.query(insertSql, params, (insErr, insRes) => {
           if (insErr) {
             console.error('Failed to insert payment_history:', insErr);
@@ -904,7 +912,7 @@ app.delete('/api/bills/:id/pay', (req, res) => {
 
 // Bulk mark bills as paid (toolbar global date applies to all)
 app.post('/api/bills/pay', (req, res) => {
-  const { bill_ids, paid_at, amount_paid } = req.body;
+  const { bill_ids, paid_at, amount_paid, payment_types, payment_type } = req.body || {};
   if (!Array.isArray(bill_ids) || bill_ids.length === 0) return res.status(400).json({ message: 'bill_ids array required' });
 
   const results = { inserted: 0, skipped: 0, errors: [] };
@@ -916,10 +924,16 @@ app.post('/api/bills/pay', (req, res) => {
         if (phErr) { results.errors.push({ id, error: phErr.message || phErr }); results.skipped++; return resolve(); }
         const cnt = (phRows && phRows[0] && phRows[0].cnt) || 0;
         if (cnt > 0) { results.skipped++; return resolve(); }
-        const insSql = paid_at ? 'INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, ?)' : 'INSERT INTO payment_history (bill_id, amount_paid, paid_at) VALUES (?, ?, NOW())';
-        const amt = (amount_paid !== undefined && amount_paid !== null) ? amount_paid : (bRows[0].amount || 0);
-        const params = paid_at ? [id, amt, paid_at] : [id, amt];
-        db.query(insSql, params, (insErr, insRes) => {
+  const amt = (amount_paid !== undefined && amount_paid !== null) ? amount_paid : (bRows[0].amount || 0);
+  const billTypeLocal = (bRows[0].bill_type || '').toString().toLowerCase();
+  const inferredLocal = (billTypeLocal.includes('water') || billTypeLocal.includes('electric')) ? 'UTILITY' : 'RENT';
+  // prefer per-id payment_types map, then single payment_type override, else inferred
+  let paymentTypeLocal = inferredLocal;
+  if (payment_types && payment_types[String(id)]) paymentTypeLocal = String(payment_types[String(id)]).toUpperCase();
+  else if (payment_type) paymentTypeLocal = String(payment_type).toUpperCase();
+  const insSql = paid_at ? 'INSERT INTO payment_history (bill_id, amount_paid, paid_at, payment_type) VALUES (?, ?, ?, ?)' : 'INSERT INTO payment_history (bill_id, amount_paid, paid_at, payment_type) VALUES (?, ?, NOW(), ?)';
+  const params = paid_at ? [id, amt, paid_at, paymentTypeLocal] : [id, amt, paymentTypeLocal];
+  db.query(insSql, params, (insErr, insRes) => {
           if (insErr) { results.errors.push({ id, error: insErr.message || insErr }); results.skipped++; return resolve(); }
           results.inserted++;
           db.query('UPDATE bills SET status = ? WHERE id = ?', ['paid', id], () => resolve());
@@ -965,10 +979,16 @@ app.get('/api/payment-history', (req, res) => {
 // Monthly income sum endpoint using payment_history
 app.get('/api/payment-history/monthly/:year/:month', (req, res) => {
   const { year, month } = req.params;
-  const sql = 'SELECT IFNULL(SUM(amount_paid),0) AS total FROM payment_history WHERE MONTH(paid_at) = ? AND YEAR(paid_at) = ?';
+  // Return breakdown by payment_type: RENT for owner income, UTILITY for pass-through
+  const sql = `SELECT
+    IFNULL(SUM(CASE WHEN payment_type = 'RENT' THEN amount_paid ELSE 0 END),0) AS rent_total,
+    IFNULL(SUM(CASE WHEN payment_type = 'UTILITY' THEN amount_paid ELSE 0 END),0) AS utility_total,
+    IFNULL(SUM(amount_paid),0) AS total
+  FROM payment_history WHERE MONTH(paid_at) = ? AND YEAR(paid_at) = ?`;
   db.query(sql, [month, year], (err, rows) => {
     if (err) return res.status(500).json({ message: 'Failed to compute monthly income' });
-    res.json({ total: (rows && rows[0] && rows[0].total) || 0 });
+    const r = rows && rows[0] ? rows[0] : { rent_total:0, utility_total:0, total:0 };
+    res.json({ rent_total: Number(r.rent_total||0), utility_total: Number(r.utility_total||0), total: Number(r.total||0) });
   });
 });
 
@@ -1010,6 +1030,7 @@ app.get('/api/reports/bills', (req, res) => {
       ph.id AS payment_history_id,
       ph.bill_id AS bill_id,
       b.tenant_id,
+  ph.payment_type AS payment_type,
       b.bill_type,
       ph.amount_paid AS amount,
       'paid' AS status,
@@ -1028,6 +1049,7 @@ app.get('/api/reports/bills', (req, res) => {
       NULL AS payment_history_id,
       b.id AS bill_id,
       b.tenant_id,
+  NULL AS payment_type,
       b.bill_type,
       b.amount AS amount,
       b.status AS status,
@@ -1049,6 +1071,181 @@ app.get('/api/reports/bills', (req, res) => {
     if (err) return res.status(500).json({ message: 'Failed to fetch reports bills' });
     res.json(rows);
   });
+});
+
+// New Reports Overview endpoint: returns summary, graphs, and detailed_table
+app.get('/api/reports/overview', (req, res) => {
+  const { startDate, endDate, tenantId } = req.query;
+  // validate dates (optional) - if not provided, default to last 6 months range
+  let sd = startDate;
+  let ed = endDate;
+  if (!sd || !ed) {
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+    sd = sd || sixMonthsAgo.toISOString().slice(0,10);
+    ed = ed || new Date(now.getFullYear(), now.getMonth()+1, 0).toISOString().slice(0,10);
+  }
+
+  // tenant filter helper
+  const tenantFilter = tenantId ? `AND tenant_id = ${db.escape(tenantId)}` : '';
+
+  // 1) Summary: rent_collected (payments), utility_collected (payments), and dues calculated from bills directly (past due only)
+  // Use subqueries so we can correctly separate paid amounts (from payment_history) and due amounts (from bills where due_date < NOW()) and optionally filter by tenantId.
+  const summarySql = `
+    SELECT
+      IFNULL((SELECT SUM(ph.amount_paid) FROM payment_history ph JOIN bills b2 ON ph.bill_id = b2.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? AND ph.payment_type = 'RENT' ${tenantId ? 'AND b2.tenant_id = ?' : ''}),0) AS rent_collected,
+      IFNULL((SELECT SUM(ph.amount_paid) FROM payment_history ph JOIN bills b2 ON ph.bill_id = b2.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? AND ph.payment_type = 'UTILITY' ${tenantId ? 'AND b2.tenant_id = ?' : ''}),0) AS utility_collected,
+      IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND b.due_date < NOW() AND LOWER(b.bill_type) LIKE '%rent%' ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS rent_due,
+      IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND b.due_date < NOW() AND (LOWER(b.bill_type) LIKE '%water%' OR LOWER(b.bill_type) LIKE '%elect%' OR LOWER(b.bill_type) LIKE '%electric%') ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS utility_due
+  `;
+
+  // 2) Occupancy rate: tenants with active contracts / total rooms (apartments)
+  const occupancySql = `
+    SELECT
+      (SELECT COUNT(*) FROM tenants WHERE status = 'active') AS active_tenants,
+      (SELECT COUNT(*) FROM apartments) AS total_rooms
+  `;
+
+  // 3) Late payments count: bills with due_date in range and past due (status pending and due_date < now)
+  const lateSql = `
+    SELECT COUNT(*) AS late_count FROM bills WHERE (status IS NULL OR status <> 'paid') AND DATE(due_date) BETWEEN ? AND ? AND due_date < NOW() ${tenantId ? 'AND tenant_id = ?' : ''}
+  `;
+
+  // 4) Monthly totals (rent vs utility) from payment_history grouped by month (YYYY-MM)
+  const monthlySql = `
+    SELECT DATE_FORMAT(ph.paid_at, '%Y-%m') AS month,
+      IFNULL(SUM(CASE WHEN ph.payment_type = 'RENT' THEN ph.amount_paid ELSE 0 END),0) AS rent_collected,
+      IFNULL(SUM(CASE WHEN ph.payment_type = 'UTILITY' THEN ph.amount_paid ELSE 0 END),0) AS utility_collected
+    FROM payment_history ph
+    WHERE DATE(ph.paid_at) BETWEEN ? AND ?
+    ${tenantId ? 'AND ph.bill_id IN (SELECT id FROM bills WHERE tenant_id = ?)' : ''}
+    GROUP BY month
+    ORDER BY month ASC
+  `;
+
+  // 5) Status breakdown (paid vs due) - amounts
+  const statusSql = `
+    SELECT status, IFNULL(SUM(amount),0) AS total FROM (
+      SELECT 'paid' AS status, ph.amount_paid AS amount FROM payment_history ph JOIN bills b ON ph.bill_id = b.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? ${tenantId ? 'AND b.tenant_id = ?' : ''}
+      UNION ALL
+      SELECT 'due' AS status, b.amount AS amount FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND DATE(b.due_date) BETWEEN ? AND ? ${tenantId ? 'AND b.tenant_id = ?' : ''}
+    ) u GROUP BY status
+  `;
+
+  // 6) Bill type breakdown (water, electricity, rent) - include both paid and due totals
+  const typeSql = `
+    SELECT bill_type, IFNULL(SUM(amount),0) AS total FROM (
+      SELECT b.bill_type AS bill_type, ph.amount_paid AS amount FROM payment_history ph JOIN bills b ON ph.bill_id = b.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? ${tenantId ? 'AND b.tenant_id = ?' : ''}
+      UNION ALL
+      SELECT b.bill_type AS bill_type, b.amount AS amount FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND DATE(b.due_date) BETWEEN ? AND ? ${tenantId ? 'AND b.tenant_id = ?' : ''}
+    ) vu GROUP BY bill_type ORDER BY total DESC
+  `;
+
+  // 7) Detailed table: pending bills + paid entries (similar to /api/reports/bills)
+  const detailSql = `
+    -- Paid rows: infer more granular payment_type from bill_type when payment_history marks UTILITY
+    SELECT ph.id AS payment_history_id,
+      ph.bill_id AS bill_id,
+      b.tenant_id,
+      CASE
+        WHEN ph.payment_type = 'RENT' THEN 'RENT'
+        WHEN LOWER(b.bill_type) LIKE '%water%' THEN 'WATER'
+        WHEN LOWER(b.bill_type) LIKE '%elect%' OR LOWER(b.bill_type) LIKE '%electric%' OR LOWER(b.bill_type) LIKE '%elec%' THEN 'ELECTRICITY'
+        ELSE UPPER(ph.payment_type)
+      END AS payment_type,
+      b.bill_type,
+      ph.amount_paid AS amount,
+      'paid' AS status,
+      ph.paid_at AS date,
+      t.name AS tenant_name
+    FROM payment_history ph
+    JOIN bills b ON ph.bill_id = b.id
+    LEFT JOIN tenants t ON b.tenant_id = t.id
+    WHERE DATE(ph.paid_at) BETWEEN ? AND ?
+    ${tenantId ? 'AND b.tenant_id = ?' : ''}
+
+    UNION ALL
+
+    -- Pending rows: infer payment_type from bill_type
+    SELECT NULL AS payment_history_id,
+      b.id AS bill_id,
+      b.tenant_id,
+      CASE
+        WHEN LOWER(b.bill_type) LIKE '%rent%' THEN 'RENT'
+        WHEN LOWER(b.bill_type) LIKE '%water%' THEN 'WATER'
+        WHEN LOWER(b.bill_type) LIKE '%elect%' OR LOWER(b.bill_type) LIKE '%electric%' OR LOWER(b.bill_type) LIKE '%elec%' THEN 'ELECTRICITY'
+        ELSE 'RENT'
+      END AS payment_type,
+      b.bill_type,
+      b.amount AS amount,
+      b.status AS status,
+      b.due_date AS date,
+      t.name AS tenant_name
+    FROM bills b
+    LEFT JOIN tenants t ON b.tenant_id = t.id
+    WHERE (b.status IS NULL OR b.status <> 'paid') AND DATE(b.due_date) BETWEEN ? AND ?
+    ${tenantId ? 'AND b.tenant_id = ?' : ''}
+    ORDER BY date DESC
+  `;
+
+  // run queries in parallel using Promise wrappers
+  const p = (sql, params) => new Promise((resolve) => db.query(sql, params, (err, rows) => { if (err) return resolve({ err }); resolve(rows); }));
+
+  (async () => {
+    try {
+  // build params for the summarySql in the correct order
+  const summaryParams = [];
+  // rent_collected params
+  summaryParams.push(sd, ed);
+  if (tenantId) summaryParams.push(tenantId);
+  // utility_collected params
+  summaryParams.push(sd, ed);
+  if (tenantId) summaryParams.push(tenantId);
+  // rent_due params (only tenantId if present)
+  if (tenantId) summaryParams.push(tenantId);
+  // utility_due params (only tenantId if present)
+  if (tenantId) summaryParams.push(tenantId);
+
+  const summaryRows = await p(summarySql, summaryParams);
+  // temporary debug log to verify correct due/collected totals
+  console.log('REPORTS OVERVIEW - summaryRows:', summaryRows && summaryRows[0] ? summaryRows[0] : summaryRows);
+      const occupancyRows = await p(occupancySql, []);
+      const lateRows = tenantId ? await p(lateSql, [sd, ed, tenantId]) : await p(lateSql, [sd, ed]);
+      const monthlyRows = tenantId ? await p(monthlySql, [sd, ed, tenantId]) : await p(monthlySql, [sd, ed]);
+      const statusRows = tenantId ? await p(statusSql, [sd, ed, tenantId, sd, ed, tenantId]) : await p(statusSql, [sd, ed, sd, ed]);
+      const typeRows = tenantId ? await p(typeSql, [sd, ed, tenantId, sd, ed, tenantId]) : await p(typeSql, [sd, ed, sd, ed]);
+      const detailRows = tenantId ? await p(detailSql, [sd, ed, tenantId, sd, ed, tenantId]) : await p(detailSql, [sd, ed, sd, ed]);
+
+      if (summaryRows && summaryRows.err) return res.status(500).json({ message: 'Failed to compute summary' });
+
+      const s = (summaryRows && summaryRows[0]) || { rent_collected:0, utility_collected:0, rent_due:0, utility_due:0 };
+      const occ = (occupancyRows && occupancyRows[0]) || { active_tenants:0, total_rooms:0 };
+      const lateCount = (lateRows && lateRows[0] && lateRows[0].late_count) ? Number(lateRows[0].late_count) : 0;
+
+      const summary = {
+        rent_collected: Number(s.rent_collected||0),
+        rent_due: Number(s.rent_due||0),
+        utility_collected: Number(s.utility_collected||0),
+        utility_due: Number(s.utility_due||0),
+        occupancy_rate: occ.total_rooms ? Number(((occ.active_tenants/occ.total_rooms)*100).toFixed(2)) : 0,
+        late_payment_count: lateCount
+      };
+
+      // build monthly_totals array
+      const monthly_totals = (monthlyRows || []).map(r => ({ month: r.month, rent_collected: Number(r.rent_collected||0), utility_collected: Number(r.utility_collected||0) }));
+
+      // status breakdown
+      const status_breakdown = (statusRows || []).map(r => ({ status: r.status, total: Number(r.total||0) }));
+
+      // bill type breakdown (normalize keys)
+      const bill_type_breakdown = (typeRows || []).map(r => ({ bill_type: r.bill_type, total: Number(r.total||0) }));
+
+      return res.json({ summary, graphs: { monthly_totals, status_breakdown, bill_type_breakdown }, detailed_table: (detailRows && Array.isArray(detailRows) ? detailRows : []) });
+    } catch (e) {
+      console.error('Reports overview error', e);
+      return res.status(500).json({ message: 'Failed to generate reports overview', error: e && e.message ? e.message : e });
+    }
+  })();
 });
 
 app.get('/api/bills/overdue', (req, res) => {
@@ -1184,8 +1381,9 @@ app.listen(PORT, async () => {
     CREATE TABLE IF NOT EXISTS \`payment_history\` (
       \`id\` INT AUTO_INCREMENT PRIMARY KEY,
       \`bill_id\` INT NOT NULL,
-      \`amount_paid\` DECIMAL(12,2) NOT NULL DEFAULT 0,
-      \`paid_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`amount_paid\` DECIMAL(12,2) NOT NULL DEFAULT 0,
+  \`paid_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  \`payment_type\` VARCHAR(10) NOT NULL DEFAULT 'RENT',
       \`created_at\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (bill_id) REFERENCES bills(id) ON DELETE CASCADE
     )`;

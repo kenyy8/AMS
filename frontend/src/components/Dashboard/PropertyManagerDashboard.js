@@ -33,7 +33,7 @@ const PropertyManagerDashboard = () => {
 	const [chartModalOpen, setChartModalOpen] = useState(false);
 	const [monthlyLabel, setMonthlyLabel] = useState('');
 	const [monthlyTotal, setMonthlyTotal] = useState(0);
-	const [stats, setStats] = useState({ totalTenants: 0, totalApartments: 0, occupiedApartments: 0, overdueBills: 0, totalRevenue: 0 });
+		const [stats, setStats] = useState({ totalTenants: 0, totalApartments: 0, occupiedApartments: 0, overdueBills: 0, totalRevenue: 0, rentIncome: 0, utilityCollections: 0 });
 	const [allBills, setAllBills] = useState([]);
 	const [monthlyPayments, setMonthlyPayments] = useState([]);
 	const [recentBills, setRecentBills] = useState([]);
@@ -65,6 +65,15 @@ const PropertyManagerDashboard = () => {
 		return false;
 	};
 
+	// helper: infer payment_type when missing
+	const inferPaymentType = (row) => {
+		const pt = (row.payment_type || '').toString().toUpperCase();
+		if (pt) return pt;
+		const bt = (row.bill_type || '').toString().toLowerCase();
+		if (bt.includes('water') || bt.includes('elect') || bt.includes('elec')) return 'UTILITY';
+		return 'RENT';
+	};
+
 	// helper: determine if a bill is overdue by business rule (7 days past due)
 	const isOverdueByRule = (b) => {
 		if (!b || !b.due_date) return false;
@@ -77,7 +86,7 @@ const PropertyManagerDashboard = () => {
 	};
 
 		// MonthlyIncomeChart supports dynamic ranges and ensures y-axis starts at zero.
-		const MonthlyIncomeChart = ({ bills, payments, range = { type: '6m' }, compact = true, showHeader = true, onTotals = null }) => {
+	const MonthlyIncomeChart = ({ bills, payments, range = { type: '6m' }, compact = true, showHeader = true, onTotals = null }) => {
 			const now = new Date();
 
 			// resolve range into months and labels
@@ -110,6 +119,9 @@ const PropertyManagerDashboard = () => {
 			}
 
 			const totals = new Array(labels.length).fill(0);
+			// We'll compute separate series for RENT and UTILITY (cumulative chart expects running totals)
+			const rentSeries = new Array(labels.length).fill(0);
+			const utilitySeries = new Array(labels.length).fill(0);
 			// Prefer explicit payments array when provided (payment_history) for accurate revenue
 			const source = Array.isArray(payments) && payments.length > 0 ? payments : (Array.isArray(bills) ? bills : []);
 			// guard: ensure source is an array before iterating
@@ -118,36 +130,58 @@ const PropertyManagerDashboard = () => {
 				if (!d) return;
 				const dt = new Date(d);
 				if (isNaN(dt)) return;
-				const amt = Number(item.amount_paid || item.amount || item.payment_amount_paid || 0);
+				const amt = Number(item.amount_paid || item.amount || item.payment_amount_paid || 0) || 0;
+				const paymentType = inferPaymentType(item);
 				if (fromDate) {
 					if (dt < fromDate || dt > toDate) return;
 					const idx = (dt.getFullYear() - fromDate.getFullYear()) * 12 + (dt.getMonth() - fromDate.getMonth());
-					if (idx >= 0 && idx < totals.length) totals[idx] += amt;
+					if (idx >= 0 && idx < labels.length) {
+						if (paymentType === 'UTILITY') utilitySeries[idx] += amt; else rentSeries[idx] += amt;
+						totals[idx] += amt;
+					}
 				} else {
 					const diffMonths = (now.getFullYear() - dt.getFullYear()) * 12 + (now.getMonth() - dt.getMonth());
-					if (diffMonths >= 0 && diffMonths < labels.length) totals[labels.length - 1 - diffMonths] += amt;
+					if (diffMonths >= 0 && diffMonths < labels.length) {
+						const idx = labels.length - 1 - diffMonths;
+						if (paymentType === 'UTILITY') utilitySeries[idx] += amt; else rentSeries[idx] += amt;
+						totals[idx] += amt;
+					}
 				}
 			});
+
+			// convert monthly buckets into cumulative running totals for each series
+			const cumRent = []; const cumUtility = [];
+			let rAcc = 0; let uAcc = 0;
+			for (let i = 0; i < labels.length; i++) { rAcc += rentSeries[i]; uAcc += utilitySeries[i]; cumRent.push(rAcc); cumUtility.push(uAcc); }
 
 			const data = useMemo(() => ({
 				labels,
 				datasets: [
 					{
-						label: 'Monthly Income',
-						data: totals,
+						label: 'Rent Collected',
+						data: cumRent,
 						fill: false,
-						borderColor: '#6c5ce7',
-						backgroundColor: '#6c5ce7',
+						borderColor: '#2ecc71',
+						backgroundColor: '#2ecc71',
+						tension: 0.25,
+						pointRadius: 3,
+					},
+					{
+						label: 'Utility Collected',
+						data: cumUtility,
+						fill: false,
+						borderColor: '#e74c3c',
+						backgroundColor: '#e74c3c',
 						tension: 0.25,
 						pointRadius: 3,
 					}
 				]
-			}), [labels.join('|'), totals.join('|')]);
+			}), [labels.join('|'), cumRent.join('|'), cumUtility.join('|')]);
 
 			// report totals back to parent if callback provided
 			useEffect(() => {
 				if (typeof onTotals === 'function') {
-					onTotals({ label: fromDate ? 'Monthly Income (custom)' : `Monthly Income (last ${labels.length})`, total: totals.reduce((s, n) => s + n, 0) });
+					onTotals({ label: fromDate ? 'Cumulative Collections (custom)' : `Cumulative Collections (last ${labels.length})`, total: totals.reduce((s, n) => s + n, 0) });
 				}
 			}, [labels.join('|'), totals.join('|')]);
 
@@ -164,7 +198,7 @@ const PropertyManagerDashboard = () => {
 			const options = {
 				responsive: true,
 				maintainAspectRatio: false,
-				plugins: { legend: { display: false } },
+				plugins: { legend: { display: true } },
 				scales: {
 					x: { display: true, title: { display: false } },
 					y: {
@@ -185,12 +219,23 @@ const PropertyManagerDashboard = () => {
 				}
 			};
 
+			// enhance tooltip to show series label + running total with peso sign
+			options.plugins.tooltip = {
+				callbacks: {
+					label: function(context) {
+						const label = context.dataset.label || '';
+						const v = Number(context.parsed.y || 0);
+						return `${label}: ₱${v.toLocaleString()}`;
+					}
+				}
+			};
+
 			return (
 				<div className="card card-glass p-3" style={{ border: 'none' }}>
 					{showHeader && (
 						<div className="d-flex justify-content-between align-items-start">
 							<div>
-								<div className="text-muted">Monthly Income {fromDate ? `(custom)` : `(last ${labels.length})`}</div>
+								<div className="text-muted">Cumulative Collections: Rent vs Utility {fromDate ? `(custom)` : `(last ${labels.length})`}</div>
 								<div className="h5 mb-2">{`₱${totals.reduce((s, n) => s + n, 0).toLocaleString()}`}</div>
 							</div>
 							<div className="text-muted small">{/* placeholder for potential extra metric */}</div>
@@ -242,7 +287,10 @@ const PropertyManagerDashboard = () => {
 
 			// totalRevenue should only include payment_history sums
 			const totalRevenueFromPayments = payments.reduce((s, p) => s + (Number(p.amount_paid || 0)), 0);
-			setStats({ totalTenants: tenants.length, totalApartments: apartments.length, occupiedApartments: occupiedCount, overdueBills: bills.filter(isOverdue).length, totalRevenue: totalRevenueFromPayments });
+			// compute breakdown by payment_type (default RENT)
+			const rentIncome = payments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'RENT') ? Number(p.amount_paid || 0) : 0), 0);
+			const utilityCollections = payments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'UTILITY') ? Number(p.amount_paid || 0) : 0), 0);
+			setStats({ totalTenants: tenants.length, totalApartments: apartments.length, occupiedApartments: occupiedCount, overdueBills: bills.filter(isOverdue).length, totalRevenue: totalRevenueFromPayments, rentIncome, utilityCollections });
 			setAllBills(bills);
 			// attach payments to state for monthly chart consumption
 			// we'll enrich payments into a simple array accessible by MonthlyIncomeChart via allBillsPayments variable
@@ -280,7 +328,9 @@ const PropertyManagerDashboard = () => {
 	useEffect(() => {
 		if (!monthlyPayments) return;
 		const paidTotal = monthlyPayments.reduce((s, p) => s + Number(p.amount_paid || 0), 0);
-		setStats(prev => ({ ...prev, totalRevenue: paidTotal }));
+		const rentIncome = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'RENT') ? Number(p.amount_paid || 0) : 0), 0);
+		const utilityCollections = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'UTILITY') ? Number(p.amount_paid || 0) : 0), 0);
+		setStats(prev => ({ ...prev, totalRevenue: paidTotal, rentIncome, utilityCollections }));
 	}, [monthlyPayments]);
 
 	// Recompute monthly totals in the parent so the displayed total is never a stale/fixed value
@@ -349,8 +399,30 @@ const PropertyManagerDashboard = () => {
 
 	if (loading) return <div className="container-fluid"><div className="text-center">Loading...</div></div>;
 
-	const grouped = { electricity: [], water: [], other: [] };
-	meterDevices.forEach(d => { const mt = (d.meter_type || d.type || '').toString().toLowerCase(); if (mt.includes('elect')) grouped.electricity.push(d); else if (mt.includes('water')) grouped.water.push(d); else grouped.other.push(d); });
+	// New KPI computations
+	const vacantUnits = Math.max(0, (stats.totalApartments || 0) - (stats.occupiedApartments || 0));
+	const rentBilled = allBills.reduce((s, b) => {
+		const bt = (b.bill_type || '').toString().toLowerCase();
+		const pt = (b.payment_type || '').toString().toLowerCase();
+		if (bt.includes('rent') || pt === 'rent') return s + Number(b.amount_due || b.amount || 0);
+		return s;
+	}, 0);
+	const utilityBilled = allBills.reduce((s, b) => {
+		const bt = (b.bill_type || '').toString().toLowerCase();
+		const pt = (b.payment_type || '').toString().toLowerCase();
+		if (bt.includes('water') || bt.includes('elect') || pt === 'utility') return s + Number(b.amount_due || b.amount || 0);
+		return s;
+	}, 0);
+	const rentCollected = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'RENT') ? Number(p.amount_paid || p.amount || 0) : 0), 0);
+	const utilityCollected = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'UTILITY') ? Number(p.amount_paid || p.amount || 0) : 0), 0);
+	const rentCollectionRate = rentBilled > 0 ? Math.round((rentCollected / rentBilled) * 100) : (rentCollected > 0 ? 100 : 0);
+	const utilityCollectionRate = utilityBilled > 0 ? Math.round((utilityCollected / utilityBilled) * 100) : (utilityCollected > 0 ? 100 : 0);
+
+	// Action center metrics
+	const overdueCount = allBills.filter(b => !isPaid(b) && isOverdueByRule(b)).length;
+	const now = new Date();
+	const expiringLeases = []; // derive from tenants when available; placeholder
+	const latePayersCount = allBills.filter(b => !isPaid(b) && b.due_date && (new Date(b.due_date) < now)).length;
 
 	return (
 		<div className="manager-dashboard">
@@ -366,87 +438,145 @@ const PropertyManagerDashboard = () => {
 			<div className="container-fluid mgr-main">
 				<div className="center-nav-wrap text-center mb-3"><nav className="center-nav">{navItems.map(item => <button key={item.key} className="center-nav-item" onClick={() => navigate(item.to)}>{item.label}</button>)}</nav></div>
 
+				{/* KPI Row 1 */}
 				<div className="row mb-3">
-					<div className="col-12">
-						<div className="pm-summary-row">
-							<div className="pm-summary-card card card-glass p-3"><div className="text-muted">Tenants</div><div className="h3">{stats.totalTenants}</div></div>
-							<div className="pm-summary-card card card-glass p-3"><div className="text-muted">Apartments</div><div className="h3">{stats.totalApartments}</div></div>
-							<div className="pm-summary-card card card-glass p-3"><div className="text-muted">Occupied</div><div className="h3">{stats.occupiedApartments}</div></div>
-							<div className="pm-summary-card card card-glass p-3"><div className="text-muted">Overdue Bills</div><div className="h3">{stats.overdueBills}</div></div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Tenants</div>
+							<div className="h3">{stats.totalTenants}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Apartments</div>
+							<div className="h3">{stats.totalApartments}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Occupied</div>
+							<div className="h3">{stats.occupiedApartments}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card clickable" onClick={() => navigate('/apartment-management')} role="button">
+							<div className="text-muted small">Vacant Units</div>
+							<div className="h3">{vacantUnits}</div>
 						</div>
 					</div>
 				</div>
 
-				<div className="row align-items-start mb-4">
-		    <div className="col-lg-6 col-md-12 mb-3">
-			    <div className="pm-chart-card card panel">
-								<div className="card-header d-flex justify-content-between align-items-center">
-									<div className="d-flex align-items-center gap-3">
-										<div className="d-flex align-items-baseline gap-2">
-											<div className="text-muted small mb-0">{monthlyLabel || `Monthly Income`}</div>
-											<div className="h5 mb-0">{monthlyTotal ? `₱${monthlyTotal.toLocaleString()}` : ''}</div>
-										</div>
-										<div className="pm-chart-embedded-toolbar-inline">
-											<button className={`range-btn ${incomeRange.type === '3m' ? 'active' : ''}`} onClick={() => setIncomeRange({ type: '3m' })}>3M</button>
-											<button className={`range-btn ${incomeRange.type === '6m' ? 'active' : ''}`} onClick={() => setIncomeRange({ type: '6m' })}>6M</button>
-											<button className={`range-btn ${incomeRange.type === '12m' ? 'active' : ''}`} onClick={() => setIncomeRange({ type: '12m' })}>12M</button>
-										</div>
+				{/* KPI Row 2 */}
+				<div className="row mb-4">
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Owner Income (Rent)</div>
+							<div className="h4">{`₱${(stats.rentIncome||0).toLocaleString()}`}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Utility Pass-Through</div>
+							<div className="h4">{`₱${(stats.utilityCollections||0).toLocaleString()}`}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Rent Collection Rate</div>
+							<div className="h4">{`${rentCollectionRate}%`}</div>
+						</div>
+					</div>
+					<div className="col-sm-6 col-md-3">
+						<div className="card card-glass p-3 pm-kpi-card">
+							<div className="text-muted small">Utility Collection Rate</div>
+							<div className="h4">{`${utilityCollectionRate}%`}</div>
+						</div>
+					</div>
+				</div>
+
+				{/* Graphs Row */}
+				<div className="row mb-4 pm-charts-grid">
+					<div className="col-12 col-md-6 col-lg-3 mb-3">
+						<div className="card card-glass p-2 pm-mini-chart">
+							<div className="d-flex justify-content-between align-items-center mb-2">
+								<div className="small text-muted">Rent & Utility Cash Flow</div>
+								<button className="btn btn-sm btn-outline-secondary" onClick={() => setChartModalOpen(true)}>Expand</button>
+							</div>
+							<div style={{ height: 120 }}><MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={true} showHeader={false} /></div>
+						</div>
+					</div>
+					<div className="col-12 col-md-6 col-lg-3 mb-3">
+						<div className="card card-glass p-2 pm-mini-chart">
+							<div className="d-flex justify-content-between align-items-center mb-2">
+								<div className="small text-muted">Payment Status</div>
+								<button className="btn btn-sm btn-outline-secondary">Expand</button>
+							</div>
+							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Payment status breakdown</div>
+						</div>
+					</div>
+					<div className="col-12 col-md-6 col-lg-3 mb-3">
+						<div className="card card-glass p-2 pm-mini-chart">
+							<div className="d-flex justify-content-between align-items-center mb-2">
+								<div className="small text-muted">Occupancy Trend</div>
+								<button className="btn btn-sm btn-outline-secondary">Expand</button>
+							</div>
+							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Occupancy trend</div>
+						</div>
+					</div>
+					<div className="col-12 col-md-6 col-lg-3 mb-3">
+						<div className="card card-glass p-2 pm-mini-chart">
+							<div className="d-flex justify-content-between align-items-center mb-2">
+								<div className="small text-muted">Tenant Growth</div>
+								<button className="btn btn-sm btn-outline-secondary">Expand</button>
+							</div>
+							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center text-muted">Tenant growth</div>
+						</div>
+					</div>
+				</div>
+
+				{/* Action Center */}
+				<div className="row mb-5">
+					<div className="col-12 col-md-6">
+						<div className="card card-glass p-3">
+							<div className="d-flex justify-content-between align-items-center mb-2"><strong>Action Center</strong><small className="text-muted">Quick actions & alerts</small></div>
+							<div>
+								<div className="pm-action-item d-flex justify-content-between align-items-center p-2" style={{ borderBottom: '1px solid #eee' }}>
+									<div>
+										<div className="text-muted small">Overdue Bills</div>
+										<div className="h5">{overdueCount}</div>
 									</div>
-									<button className="btn btn-sm btn-outline-primary" onClick={() => setChartModalOpen(true)}>View More</button>
+									<div>
+										<button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/bill-management?filter=overdue')}>View</button>
+									</div>
 								</div>
-								<div className="card-body p-0">
-									<MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={true} showHeader={false} onTotals={({ label, total }) => { setMonthlyLabel(label); setMonthlyTotal(total); }} />
+								<div className="pm-action-item d-flex justify-content-between align-items-center p-2" style={{ borderBottom: '1px solid #eee' }}>
+									<div>
+										<div className="text-muted small">Expiring Leases (30d)</div>
+										<div className="h5">{expiringLeases.length}</div>
+									</div>
+									<div>
+										<button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/tenant-management?filter=expiring')}>View</button>
+									</div>
+								</div>
+								<div className="pm-action-item d-flex justify-content-between align-items-center p-2">
+									<div>
+										<div className="text-muted small">Late Payers</div>
+										<div className="h5">{latePayersCount}</div>
+									</div>
+									<div>
+										<button className="btn btn-sm btn-outline-primary" onClick={() => navigate('/bill-management?filter=late')}>View</button>
+									</div>
 								</div>
 							</div>
+						</div>
 					</div>
-					<div className="col-lg-6 col-md-12">
-						<div className="card panel">
-							<div className="card-header d-flex justify-content-between align-items-center">
-								<span>Recent Bills</span>
-								<button className="btn btn-sm btn-outline-primary" onClick={() => setModalOpen(prev => ({ ...prev, recentBills: true }))}>View More</button>
-							</div>
-							<div className="card-body">
-								{recentBills.length === 0 ? <div className="text-muted">No recent bills</div> : (
-										<table className="table table-sm pm-recent-bills-table"><thead><tr><th>Tenant</th><th className="amount-col">Amount</th><th>Due</th><th className="status-col">Status</th></tr></thead>
-										<tbody>{recentBills.slice(0,3).map(b => { const paused = Boolean(b.is_paused || b.tenant_is_paused || b.status === 'paused'); const statusRaw = (b.status || '').toString(); const overdue = isOverdueByRule(b); let statusClass = 'pm-status-pending'; if (overdue) statusClass = 'pm-status-overdue'; else if (statusRaw.toLowerCase().includes('paid')) statusClass = 'pm-status-paid'; return (<tr key={b.id || b._id} style={{ background: paused ? '#f8f9fa' : 'transparent' }}><td>{b.tenant_name || b.tenant}</td><td className="amount-col">{formatCurrencyPeso(b.amount || b.amount_due || b.amount_paid || b.payment_amount || 0)}</td><td>{b.due_date ? new Date(b.due_date).toLocaleDateString() : ''}</td><td className="status-col">{paused ? <span className="pm-status-badge">paused</span> : <span className={`pm-status-badge ${statusClass}`}>{overdue ? 'overdue' : statusRaw}</span>}</td></tr>); })}</tbody>
-									</table>
-								)}
-							</div>
+					<div className="col-12 col-md-6">
+						<div className="card card-glass p-3">
+							<div className="d-flex justify-content-between align-items-center mb-2"><strong>Notes</strong><small className="text-muted">Tips & recent activity</small></div>
+							<div className="text-muted small">Dashboard refreshed automatically. Click any card to drill into the respective management page.</div>
 						</div>
 					</div>
 				</div>
-
-				<div className="row">
-					<div className="col-md-6">
-						<div className="card panel">
-							<div className="card-header d-flex justify-content-between align-items-center"><span>🔌 Electricity Meters ({grouped.electricity.length})</span><button className="btn btn-sm btn-outline-primary" onClick={() => setModalOpen(prev => ({ ...prev, electricity: true }))}>View More</button></div>
-							<div className="card-body recent-bills-body"><table className="table table-sm device-table text-center"><thead><tr><th>Tenant</th><th>Apartment</th><th>Reading</th><th>Date</th></tr></thead><tbody>{grouped.electricity.slice(0,3).map(d => (<tr key={d.device_id || d.id}><td>{d.assigned_tenant || d.tenant_name || 'Unassigned'}</td><td className="text-muted">{d.apartment_number || d.unit || '-'}</td><td>{d.present_reading != null ? `${formatMeterNumber(d.present_reading)} kWh` : (d.current_reading != null ? `${formatMeterNumber(d.current_reading)} kWh` : 'N/A')}</td><td className="small text-muted">{(d.last_updated || d.updated_at) ? new Date(d.last_updated || d.updated_at).toLocaleString() : 'N/A'}</td></tr>))}</tbody></table></div>
-						</div>
-					</div>
-					<div className="col-md-6">
-						<div className="card panel">
-							<div className="card-header d-flex justify-content-between align-items-center"><span>🚰 Water Meters ({grouped.water.length})</span><button className="btn btn-sm btn-outline-primary" onClick={() => setModalOpen(prev => ({ ...prev, water: true }))}>View More</button></div>
-							<div className="card-body recent-bills-body"><table className="table table-sm device-table text-center"><thead><tr><th>Tenant</th><th>Apartment</th><th>Reading</th><th>Date</th></tr></thead><tbody>{grouped.water.slice(0,3).map(d => (<tr key={d.device_id || d.id}><td>{d.assigned_tenant || d.tenant_name || 'Unassigned'}</td><td className="text-muted">{d.apartment_number || d.unit || '-'}</td><td>{d.present_reading != null ? `${formatMeterNumber(d.present_reading)} /m³` : (d.current_reading != null ? `${formatMeterNumber(d.current_reading)} /m³` : 'N/A')}</td><td className="small text-muted">{(d.last_updated || d.updated_at) ? new Date(d.last_updated || d.updated_at).toLocaleString() : 'N/A'}</td></tr>))}</tbody></table></div>
-						</div>
-					</div>
-				</div>
-
-				{modalOpen.recentBills && (
-					<div className="pm-modal-backdrop-centered">
-						<div className="pm-modal-centered">
-							<div className="p-3 d-flex justify-content-between align-items-center" style={{ borderBottom: '1px solid #eee' }}>
-								<strong>Recent Bills</strong>
-								<button className="btn btn-sm btn-outline-secondary" onClick={() => setModalOpen(prev => ({ ...prev, recentBills: false }))}>Close</button>
-							</div>
-							<div className="p-3" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-								<table className="table table-sm pm-recent-bills-table">
-									<thead><tr><th>Tenant</th><th className="amount-col">Amount</th><th>Due</th><th className="status-col">Status</th></tr></thead>
-									<tbody>{allBills.map(b => { const statusRaw = (b.status || '').toString(); const overdue = isOverdueByRule(b); let statusClass = 'pm-status-pending'; if (overdue) statusClass = 'pm-status-overdue'; else if (statusRaw.toLowerCase().includes('paid')) statusClass = 'pm-status-paid'; return (<tr key={b.id || b._id}><td>{b.tenant_name || b.tenant}</td><td className="amount-col">{formatCurrencyPeso(b.amount || b.amount_due || b.amount_paid || b.payment_amount || 0)}</td><td>{b.due_date ? new Date(b.due_date).toLocaleDateString() : ''}</td><td className="status-col">{<span className={`pm-status-badge ${statusClass}`}>{overdue ? 'overdue' : statusRaw}</span>}</td></tr>); })}</tbody>
-								</table>
-							</div>
-						</div>
-					</div>
-				)}
 
 				{chartModalOpen && (
 					<div className="pm-modal-backdrop-centered">
@@ -456,46 +586,11 @@ const PropertyManagerDashboard = () => {
 								<button className="btn btn-sm btn-outline-secondary" onClick={() => setChartModalOpen(false)}>✕</button>
 							</div>
 							<div className="p-3" style={{ maxHeight: '80vh', overflow: 'auto' }}>
-								<div className="mb-3 d-flex gap-2 align-items-center">
-									<label className="text-muted small mb-0">Custom range:</label>
-									<input type="date" value={incomeRange.from || ''} onChange={e => setIncomeRange(prev => ({ ...prev, from: e.target.value, type: 'custom' }))} />
-									<input type="date" value={incomeRange.to || ''} onChange={e => setIncomeRange(prev => ({ ...prev, to: e.target.value, type: 'custom' }))} />
-									<button className="btn btn-sm btn-primary" onClick={() => { /* keep range already set, modal will show chart */ }}>Apply</button>
-								</div>
-												<MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={false} onTotals={({ label, total }) => { setMonthlyLabel(label); setMonthlyTotal(total); }} />
-								{/* Potential extra details could be added here (breakdown, table) */}
+								<MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={false} onTotals={({ label, total }) => { setMonthlyLabel(label); setMonthlyTotal(total); }} />
 							</div>
 						</div>
 					</div>
 				)}
-
-						{modalOpen.electricity && (
-							<div className="pm-modal-backdrop-centered">
-								<div className="pm-modal-centered">
-									<div className="p-3 d-flex justify-content-between align-items-center" style={{ borderBottom: '1px solid #eee' }}><strong>Electricity Meters</strong><button className="btn btn-sm btn-outline-secondary" onClick={() => setModalOpen(prev => ({ ...prev, electricity: false }))}>Close</button></div>
-									<div className="p-3" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-										<table className="table table-sm">
-											<thead><tr><th>Tenant</th><th>Unit</th><th>Reading</th><th>Updated</th></tr></thead>
-											<tbody>{grouped.electricity.map(d => (<tr key={d.device_id || d.id}><td>{d.assigned_tenant || d.tenant_name || 'Unassigned'}</td><td className="text-muted">{d.apartment_number || d.unit || '-'}</td><td>{d.present_reading != null ? formatMeterNumber(d.present_reading) : (d.current_reading != null ? formatMeterNumber(d.current_reading) : 'N/A')}</td><td className="small text-muted">{(d.last_updated || d.updated_at) ? new Date(d.last_updated || d.updated_at).toLocaleString() : 'N/A'}</td></tr>))}</tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						)}
-
-						{modalOpen.water && (
-							<div className="pm-modal-backdrop-centered">
-								<div className="pm-modal-centered">
-									<div className="p-3 d-flex justify-content-between align-items-center" style={{ borderBottom: '1px solid #eee' }}><strong>Water Meters</strong><button className="btn btn-sm btn-outline-secondary" onClick={() => setModalOpen(prev => ({ ...prev, water: false }))}>Close</button></div>
-									<div className="p-3" style={{ maxHeight: '70vh', overflow: 'auto' }}>
-										<table className="table table-sm">
-											<thead><tr><th>Tenant</th><th>Unit</th><th>Reading</th><th>Updated</th></tr></thead>
-											<tbody>{grouped.water.map(d => (<tr key={d.device_id || d.id}><td>{d.assigned_tenant || d.tenant_name || 'Unassigned'}</td><td className="text-muted">{d.apartment_number || d.unit || '-'}</td><td>{d.present_reading != null ? formatMeterNumber(d.present_reading) : (d.current_reading != null ? formatMeterNumber(d.current_reading) : 'N/A')}</td><td className="small text-muted">{(d.last_updated || d.updated_at) ? new Date(d.last_updated || d.updated_at).toLocaleString() : 'N/A'}</td></tr>))}</tbody>
-										</table>
-									</div>
-								</div>
-							</div>
-						)}
 
 			</div>
 		</div>

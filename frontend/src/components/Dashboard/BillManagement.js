@@ -66,6 +66,8 @@ const BillManagement = () => {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [filterType, setFilterType] = useState('all');
+  // new filter for payment type (RENT or UTILITY) for payment history and exports
+  const [filterPaymentType, setFilterPaymentType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [sortBy, setSortBy] = useState({ field: 'due_date', dir: 'asc' });
@@ -315,6 +317,15 @@ const BillManagement = () => {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
   };
 
+  // Helper: infer payment_type from bill_type when payment_type is not present
+  const inferPaymentType = (b) => {
+    if (!b) return 'RENT';
+    const t = (b.bill_type || b.type || '').toString().toLowerCase();
+    if (t.includes('water') || t.includes('wtr')) return 'UTILITY';
+    if (t.includes('electric') || t.includes('elec') || t.includes('power')) return 'UTILITY';
+    return 'RENT';
+  };
+
   const updateBill = async (e) => {
     e.preventDefault();
     try {
@@ -360,8 +371,11 @@ const BillManagement = () => {
   const markPaid = async (id) => {
     // Single bill mark paid uses bulk endpoint with globalPaidDate
     try {
-      const payload = { bill_ids: [id], paid_at: globalPaidDate };
-      await axios.post('/api/bills/pay', payload);
+  const b = bills.find(x => x.id === id) || pendingBills.find(x => x.id === id) || paidBills.find(x => x.id === id) || {};
+  const t = (b.bill_type || b.type || '').toString().toLowerCase();
+  const paymentType = (t.includes('water') || t.includes('electric')) ? 'UTILITY' : 'RENT';
+  const payload = { bill_ids: [id], paid_at: globalPaidDate, payment_types: { [String(id)]: paymentType } };
+  await axios.post('/api/bills/pay', payload);
       await refreshBills();
       showToast('Payment recorded.', 'success');
     } catch (err) {
@@ -413,10 +427,18 @@ const BillManagement = () => {
     title: 'Mark Paid',
   message: `Mark ${selectedIds.size} bill(s) as paid (date: ${globalPaidDate})?`,
     loading: false,
-    onConfirm: async () => {
+      onConfirm: async () => {
       setConfirmState(prev => ({ ...prev, loading: true }));
       try {
-    const payload = { bill_ids: Array.from(selectedIds), paid_at: globalPaidDate };
+    // build payment_types map to ensure utility/rent classification is preserved when recording
+    const ids = Array.from(selectedIds);
+    const payment_types = {};
+    ids.forEach(id => {
+      const b = bills.find(x => x.id === id) || pendingBills.find(x => x.id === id) || paidBills.find(x => x.id === id) || {};
+      const t = (b.bill_type || b.type || '').toString().toLowerCase();
+      payment_types[String(id)] = (t.includes('water') || t.includes('electric')) ? 'UTILITY' : 'RENT';
+    });
+    const payload = { bill_ids: ids, paid_at: globalPaidDate, payment_types };
     await axios.post('/api/bills/pay', payload);
         await refreshBills();
         clearSelection();
@@ -460,8 +482,8 @@ const BillManagement = () => {
     // simple CSV export of selected or all visible bills
     const rows = bills.filter(b => selectedIds.size === 0 || selectedIds.has(b.id));
   if (rows.length === 0) return showToast('No bills to export', 'info');
-    const header = ['id','tenant','type','amount','due_date','status'];
-    const csv = [header.join(',')].concat(rows.map(r => [r.id, `"${r.tenant_name||''}"`, r.bill_type, Number(r.amount).toFixed(2), r.due_date, r.status].join(','))).join('\n');
+  const header = ['id','tenant','type','payment_type','amount','due_date','status'];
+  const csv = [header.join(',')].concat(rows.map(r => [r.id, `"${r.tenant_name||''}"`, r.bill_type, (r.payment_type||inferPaymentType(r)), Number(r.amount).toFixed(2), r.due_date, r.status].join(','))).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -585,6 +607,7 @@ const BillManagement = () => {
       if (sortBy.field === 'due_date') return (new Date(a.due_date).getTime() - new Date(b.due_date).getTime()) * dir;
       if (sortBy.field === 'tenant') return ((a.tenant_name||'').localeCompare(b.tenant_name||'')) * dir;
       if (sortBy.field === 'amount') return (Number(a.amount) - Number(b.amount)) * dir;
+  if (sortBy.field === 'payment_type') return (( (a.payment_type||inferPaymentType(a)) ).localeCompare((b.payment_type||inferPaymentType(b)) )) * dir;
       return 0;
     });
   }, [pendingBills, searchText, dateFrom, dateTo, filterType, filterStatus, sortBy]);
@@ -614,6 +637,7 @@ const BillManagement = () => {
       if (sortBy.field === 'due_date') return (new Date(a.due_date).getTime() - new Date(b.due_date).getTime()) * dir;
       if (sortBy.field === 'tenant') return ((a.tenant_name||'').localeCompare(b.tenant_name||'')) * dir;
       if (sortBy.field === 'amount') return (Number(a.amount) - Number(b.amount)) * dir;
+  if (sortBy.field === 'payment_type') return (( (a.payment_type||inferPaymentType(a)) ).localeCompare((b.payment_type||inferPaymentType(b)) )) * dir;
       return 0;
     });
   }, [paidBills, searchText, dateFrom, dateTo, filterType, filterStatus, sortBy]);
@@ -629,7 +653,8 @@ const BillManagement = () => {
         const matchDate = ph.paid_at ? new Date(ph.paid_at).toISOString().split('T')[0].includes(q) : false;
         if (!(matchName || matchType || matchDate)) return false;
       }
-      if (filterType !== 'all' && canonicalizeBillType(filterType) !== ph.bill_type) return false;
+  if (filterType !== 'all' && canonicalizeBillType(filterType) !== ph.bill_type) return false;
+  if (filterPaymentType !== 'all' && String((ph.payment_type||'RENT')).toUpperCase() !== String(filterPaymentType).toUpperCase()) return false;
       if (dateFrom) {
         const d = ph.paid_at ? new Date(ph.paid_at).toISOString().split('T')[0] : '';
         if (d < dateFrom) return false;
@@ -823,6 +848,14 @@ const BillManagement = () => {
               </select>
             </div>
             <div className="col-md-2">
+              <label className="form-label small">Payment Type</label>
+              <select className="form-select" value={filterPaymentType} onChange={(e) => setFilterPaymentType(e.target.value)}>
+                <option value="all">All</option>
+                <option value="RENT">Rent</option>
+                <option value="UTILITY">Utility</option>
+              </select>
+            </div>
+            <div className="col-md-2">
               <label className="form-label small">Status</label>
               <select className="form-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="all">All</option>
@@ -847,13 +880,15 @@ const BillManagement = () => {
               </div>
             <div>
               <label className="me-2 small">Sort:</label>
-              <select className="form-select d-inline-block" style={{ width: 180 }} value={`${sortBy.field}:${sortBy.dir}`} onChange={(e) => { const [f,d] = e.target.value.split(':'); setSortBy({ field: f, dir: d }); }}>
+              <select className="form-select d-inline-block" style={{ width: 220 }} value={`${sortBy.field}:${sortBy.dir}`} onChange={(e) => { const [f,d] = e.target.value.split(':'); setSortBy({ field: f, dir: d }); }}>
                 <option value="due_date:asc">Date ↑</option>
                 <option value="due_date:desc">Date ↓</option>
                 <option value="tenant:asc">Tenant ↑</option>
                 <option value="tenant:desc">Tenant ↓</option>
                 <option value="amount:asc">Amount ↑</option>
                 <option value="amount:desc">Amount ↓</option>
+                <option value="payment_type:asc">Payment Type ↑</option>
+                <option value="payment_type:desc">Payment Type ↓</option>
               </select>
             </div>
           </div>
@@ -875,7 +910,13 @@ const BillManagement = () => {
                   onConfirm: async () => {
                     setConfirmState(prev => ({ ...prev, loading: true }));
                     try {
-                      await axios.post('/api/bills/pay', { bill_ids: ids, paid_at: globalPaidDate });
+                      const payment_types = {};
+                      ids.forEach(id => {
+                        const b = bills.find(x => x.id === id) || pendingBills.find(x => x.id === id) || {};
+                        const t = (b.bill_type || b.type || '').toString().toLowerCase();
+                        payment_types[String(id)] = (t.includes('water') || t.includes('electric')) ? 'UTILITY' : 'RENT';
+                      });
+                      await axios.post('/api/bills/pay', { bill_ids: ids, paid_at: globalPaidDate, payment_types });
                       refreshBills(); clearSelection(); showToast('Marked as paid', 'success');
                     } catch (e) {
                       refreshBills(); showToast('Failed to mark some bills', 'error');
@@ -946,6 +987,7 @@ const BillManagement = () => {
                                 <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
                                 <th>Tenant</th>
                                 <th>Type</th>
+                                <th>Payment Type</th>
                                 <th>Amount</th>
                                 <th>Due Date</th>
                                 <th>Status</th>
@@ -964,6 +1006,7 @@ const BillManagement = () => {
                                       <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
                                     </td>
                                     <td>{displayBillType(bill.bill_type)}</td>
+                                    <td>{(bill.payment_type || inferPaymentType(bill))}</td>
                                     <td>{formatMeterNumber(bill.amount)}</td>
                                     <td>{bill.due_date ? new Date(bill.due_date).toLocaleDateString() : ''}</td>
                                     <td>
@@ -1090,6 +1133,7 @@ const BillManagement = () => {
                                 <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
                                 <th>Tenant</th>
                                 <th>Type</th>
+                                <th>Payment Type</th>
                                 <th>Amount</th>
                                 <th>Paid Date</th>
                                 <th>Status</th>
@@ -1108,6 +1152,7 @@ const BillManagement = () => {
                                       <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
                                     </td>
                                     <td>{displayBillType(bill.bill_type)}</td>
+                                    <td>{(paymentHistoryRows.find(ph => String(ph.bill_id) === String(bill.id)) || {}).payment_type || inferPaymentType(bill)}</td>
                                     <td>{formatMeterNumber(bill.amount)}</td>
                                     <td>{bill.payment_paid_at ? new Date(bill.payment_paid_at).toLocaleDateString() : ''}</td>
                                     <td><span className={`status-badge ${statusClass}`}>{tenantPaused ? 'paused' : bill.status}</span></td>
