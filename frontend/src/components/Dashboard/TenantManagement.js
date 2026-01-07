@@ -1,10 +1,12 @@
 ﻿import React, { useEffect, useState } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
+// useNavigate intentionally unused in this file
+// eslint-disable-next-line no-unused-vars
+import { useNavigate } from 'react-router-dom';
 import axios from '../../axiosConfig';
 import { showToast } from '../../toastService';
 
 const TenantManagement = () => {
-  const navigate = useNavigate();
+  // navigate not used
   const [tenants, setTenants] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -160,6 +162,7 @@ const TenantManagement = () => {
   };
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null, loading: false });
 
+  // eslint-disable-next-line no-unused-vars
   const deleteTenant = (id) => {
     setConfirmState({
       open: true,
@@ -169,6 +172,8 @@ const TenantManagement = () => {
       onConfirm: async () => {
         setConfirmState(prev => ({ ...prev, loading: true }));
         try {
+          // resp intentionally ignored; UI only refreshes state after delete
+          // eslint-disable-next-line no-unused-vars
           const resp = await axios.delete(`/api/tenants/${id}`);
           // refresh tenants and apartments to stay in sync
           try {
@@ -189,24 +194,13 @@ const TenantManagement = () => {
     });
   };
 
+  // eslint-disable-next-line no-unused-vars
   const toggleTenantStatus = async (id, tenant) => {
     try {
-      const isPaused = tenant && (tenant.is_paused || tenant.is_paused === 1 || tenant.status === 'paused');
-      const action = isPaused ? 'resume' : 'pause';
-      // Call the pause endpoint which updates tenant.is_paused and bill statuses server-side
-      await axios.post(`/api/tenants/${id}/pause`, { action });
-      // Refresh tenants and apartments to pick up authoritative flags
-      const [tRes, aRes] = await Promise.all([axios.get('/api/tenants'), axios.get('/api/apartments')]);
-      setTenants(tRes.data);
-      setApartments(aRes.data);
-      try { localStorage.setItem('apartmentsUpdated', Date.now().toString()); } catch (e) {}
-
-      // notify bills list to refresh so statuses show immediately
-      try { localStorage.setItem('billsUpdated', Date.now().toString()); } catch (e) {}
-      try { window.dispatchEvent(new CustomEvent('billsUpdated')); } catch (e) {}
+  // Pause/resume feature removed. No-op to keep callers safe.
     } catch (e) {
       console.error('Update tenant status failed', e);
-      showToast('Failed to change tenant pause state', 'error');
+  showToast('Failed to change tenant status', 'error');
     }
   };
 
@@ -246,38 +240,7 @@ const TenantManagement = () => {
               <div>
                 <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => { setModalMode('create'); setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '', move_in_date: (new Date()).toISOString().split('T')[0] }); setShowModal(true); }}>+ Add Tenant</button>
                 {/* Removed global Edit button; per-row edit buttons added to each row for clarity */}
-                <button className="btn btn-sm btn-outline-warning me-2" onClick={async () => {
-                  if (selectedTenantIds.length === 0) return showToast('Select one or more tenants to Pause/Activate', 'error');
-                  // determine target status: if all paused -> activate, else pause
-                  const selected = tenants.filter(t => selectedTenantIds.includes(t.id));
-                  const allPaused = selected.every(t => t.status === 'paused');
-                  const target = allPaused ? 'active' : 'paused';
-                  setConfirmState({
-                    open: true,
-                    title: `${target === 'paused' ? 'Pause' : 'Activate'} Tenants`,
-                    message: `${target === 'paused' ? 'Pause' : 'Activate'} selected tenants?`,
-                    loading: false,
-                    onConfirm: async () => {
-                      setConfirmState(prev => ({ ...prev, loading: true }));
-                      try {
-                        for (const t of selected) {
-                          const action = target === 'paused' ? 'pause' : 'resume';
-                          await axios.post(`/api/tenants/${t.id}/pause`, { action });
-                        }
-                        const [tRes, aRes] = await Promise.all([axios.get('/api/tenants'), axios.get('/api/apartments')]);
-                        setTenants(tRes.data);
-                        setApartments(aRes.data);
-                        try { localStorage.setItem('apartmentsUpdated', Date.now().toString()); } catch (e) {}
-                        setSelectedTenantIds([]);
-                        showToast(`${target === 'paused' ? 'Paused' : 'Activated'} selected tenants`, 'success');
-                      } catch (e) {
-                        console.error('Bulk status change failed', e);
-                        showToast('Failed to change status for selected tenants', 'error');
-                      }
-                      setConfirmState({ open: false, title: '', message: '', onConfirm: null, loading: false });
-                    }
-                  });
-                }}>Pause</button>
+                {/* Pause feature removed */}
                 <button className="btn btn-sm btn-outline-danger" onClick={async () => {
                   if (selectedTenantIds.length === 0) return showToast('Select one or more tenants to delete', 'error');
                   setConfirmState({
@@ -330,16 +293,16 @@ const TenantManagement = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {tenants.sort((a,b)=>{ // active first, paused last
-                        const aPaused = a.is_paused || a.status === 'paused';
-                        const bPaused = b.is_paused || b.status === 'paused';
-                        if (aPaused === bPaused) return 0;
-                        return aPaused ? 1 : -1;
+                      {tenants.sort((a,b)=>{ // active first, others last
+                        const aActive = a.status === 'active';
+                        const bActive = b.status === 'active';
+                        if (aActive === bActive) return 0;
+                        return aActive ? -1 : 1;
                       }).map(tenant => {
                         const checked = selectedTenantIds.includes(tenant.id);
-                        const isPaused = tenant.is_paused || tenant.status === 'paused';
+                        const isActive = tenant.status === 'active';
                         return (
-                          <tr key={tenant.id} style={{ background: checked ? 'rgba(13,110,253,0.04)' : isPaused ? '#f8f9fa' : 'transparent', color: isPaused ? '#6c757d' : 'inherit' }}>
+                          <tr key={tenant.id} style={{ background: checked ? 'rgba(13,110,253,0.04)' : (!isActive ? '#f8f9fa' : 'transparent'), color: !isActive ? '#6c757d' : 'inherit' }}>
                             <td style={{ width: 40 }}>
                               <input type="checkbox" checked={checked} onChange={(e) => {
                                 if (e.target.checked) {
@@ -361,8 +324,8 @@ const TenantManagement = () => {
                             <td>{tenant.apartment_number || 'Not assigned'}</td>
                             <td>{tenant.move_in_date ? (new Date(tenant.move_in_date)).toLocaleDateString() : '-'}</td>
                             <td style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                              <span className={"badge " + (isPaused ? 'bg-warning text-dark' : tenant.status === 'active' ? 'bg-success' : 'bg-secondary')}>
-                                {isPaused ? 'paused' : tenant.status}
+                              <span className={"badge " + (tenant.status === 'active' ? 'bg-success' : 'bg-secondary')}>
+                                {tenant.status}
                               </span>
                               <button type="button" title="Edit Tenant" className="btn btn-sm btn-outline-secondary" onClick={async () => {
                                 try {

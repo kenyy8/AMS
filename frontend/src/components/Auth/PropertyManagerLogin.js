@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import axios from '../../axiosConfig';
 import { useNavigate } from 'react-router-dom';
 import './PropertyManagerLogin.css';
-import bgImage from '../../AMSBG.jpg';
 
 const PropertyManagerLogin = () => {
   const [email, setEmail] = useState('');

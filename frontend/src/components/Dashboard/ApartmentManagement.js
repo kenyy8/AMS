@@ -1,10 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
 import axios from '../../axiosConfig';
 import { showToast } from '../../toastService';
 
 const ApartmentManagement = () => {
-  const navigate = useNavigate();
+  // navigation not used in this component
   const [apartments, setApartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -12,6 +11,8 @@ const ApartmentManagement = () => {
   // modal form state (moved create UI into modal)
   const [modalForm, setModalForm] = useState({ apartment_number: '', floor: '', building: '', rent_amount: '' });
   const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
+  const [editingId, setEditingId] = useState(null);
   const [selectedApartmentIds, setSelectedApartmentIds] = useState([]);
   const [confirmState, setConfirmState] = useState({ open: false, title: '', message: '', onConfirm: null, loading: false });
 
@@ -70,6 +71,35 @@ const ApartmentManagement = () => {
       showToast(msg, 'error');
     }
     setCreating(false);
+  };
+
+  const updateApartment = async (id) => {
+    setCreating(true);
+    setError('');
+    try {
+      const payload = { ...modalForm };
+      await axios.put(`/api/apartments/${id}`, payload);
+      // update local state conservatively
+      setApartments(prev => prev.map(a => (a.id === id ? ({ ...a, ...payload }) : a)));
+      setShowModal(false);
+      setEditingId(null);
+      try { localStorage.setItem('apartmentsUpdated', Date.now().toString()); } catch (e) {}
+      showToast('Apartment updated', 'success');
+    } catch (e) {
+      const msg = e.response?.data?.message || 'Update apartment failed';
+      setError(msg);
+      showToast(msg, 'error');
+    }
+    setCreating(false);
+  };
+
+  const saveApartment = async (e) => {
+    e.preventDefault();
+    if (modalMode === 'edit' && editingId) {
+      await updateApartment(editingId);
+    } else {
+      await createApartment(e);
+    }
   };
 
   // occupancy is now derived from tenants. Manual update removed.
@@ -166,8 +196,8 @@ const ApartmentManagement = () => {
                         else setSelectedApartmentIds([]);
                       }} />
                     </th>
-                    <th>Number</th>
                     <th>Floor</th>
+                    <th>Number</th>
                     <th>Building</th>
                     <th>Rent</th>
                     <th>Status</th>
@@ -191,11 +221,23 @@ const ApartmentManagement = () => {
                               else setSelectedApartmentIds(prev => prev.filter(id => id !== a.id));
                             }} />
                           </td>
-                          <td>{a.apartment_number}</td>
                           <td>{a.floor ?? '—'}</td>
+                          <td>{a.apartment_number}</td>
                           <td>{a.building ?? '—'}</td>
                           <td>{a.rent_amount}</td>
                           <td><span className={`badge bg-${a.status === 'occupied' ? 'secondary' : 'success'}`}>{a.status}</span></td>
+                          <td style={{ width: 120 }}>
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                              <button className="btn btn-sm btn-outline-primary" title="Edit apartment" aria-label={`Edit apartment ${a.apartment_number || a.id}`} onClick={() => {
+                                // open edit modal
+                                setModalMode('edit');
+                                setEditingId(a.id);
+                                setModalForm({ apartment_number: a.apartment_number || '', floor: a.floor || '', building: a.building || '', rent_amount: a.rent_amount || '', status: a.status || 'available' });
+                                setShowModal(true);
+                              }}>✏️</button>
+                              <button className="btn btn-sm btn-outline-danger" title="Delete apartment" aria-label={`Delete apartment ${a.apartment_number || a.id}`} onClick={() => deleteApartment(a.id)}>🗑</button>
+                            </div>
+                          </td>
                         </tr>
                       );
                     })}
@@ -215,15 +257,15 @@ const ApartmentManagement = () => {
               <button className="btn btn-sm btn-outline-secondary" onClick={() => setShowModal(false)}>x</button>
             </div>
             <div className="card-body">
-              <form onSubmit={createApartment}>
+              <form onSubmit={saveApartment}>
                 <div className="row g-3">
-                  <div className="col-md-4">
-                    <label className="form-label">Number</label>
-                    <input className="form-control" value={modalForm.apartment_number} onChange={e => setModalForm(prev => ({ ...prev, apartment_number: e.target.value }))} required />
-                  </div>
                   <div className="col-md-4">
                     <label className="form-label">Floor</label>
                     <input type="number" className="form-control" value={modalForm.floor} onChange={e => setModalForm(prev => ({ ...prev, floor: e.target.value }))} />
+                  </div>
+                  <div className="col-md-4">
+                    <label className="form-label">Number</label>
+                    <input className="form-control" value={modalForm.apartment_number} onChange={e => setModalForm(prev => ({ ...prev, apartment_number: e.target.value }))} required />
                   </div>
                   <div className="col-md-4">
                     <label className="form-label">Building</label>
@@ -233,11 +275,19 @@ const ApartmentManagement = () => {
                     <label className="form-label">Rent</label>
                     <input type="number" step="0.01" className="form-control" value={modalForm.rent_amount} onChange={e => setModalForm(prev => ({ ...prev, rent_amount: e.target.value }))} />
                   </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Status</label>
+                    <select className="form-select" value={modalForm.status || 'available'} onChange={e => setModalForm(prev => ({ ...prev, status: e.target.value }))}>
+                      <option value="available">available</option>
+                      <option value="occupied">occupied</option>
+                      <option value="maintenance">maintenance</option>
+                    </select>
+                  </div>
                   {/* status is derived from tenants; manual status field removed */}
                 </div>
                 <div className="mt-3 d-flex justify-content-end">
                   <button type="button" className="btn btn-secondary me-2" onClick={() => setShowModal(false)}>Cancel</button>
-                  <button className="btn btn-primary" type="submit" disabled={creating}>{creating ? 'Creating...' : 'Create Apartment'}</button>
+                  <button className="btn btn-primary" type="submit" disabled={creating}>{creating ? (modalMode === 'edit' ? 'Saving...' : 'Creating...') : (modalMode === 'edit' ? 'Save Changes' : 'Create Apartment')}</button>
                 </div>
               </form>
             </div>

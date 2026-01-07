@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 const GlobalHeader = ({ navItems = [] }) => {
   const navigate = useNavigate();
@@ -29,9 +29,11 @@ const GlobalHeader = ({ navItems = [] }) => {
           <div className="quick-actions-header" role="toolbar" aria-label="Quick actions">
             {navItems.map(item => {
               const isActive = location.pathname === item.to || location.pathname.startsWith(item.to + '/');
+              // Use a stable unique key. Prefer item.id -> item.to -> item.key
+              const key = item.id || item.to || item.key || item.label;
               return (
                 <button
-                  key={item.key}
+                  key={key}
                   className={'qa-btn' + (isActive ? ' active' : '')}
                   onClick={() => navigate(item.to)}
                   title={item.label}

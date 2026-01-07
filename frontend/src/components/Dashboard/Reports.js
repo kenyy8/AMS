@@ -1,5 +1,5 @@
-﻿import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, NavLink } from 'react-router-dom';
+﻿/* eslint-disable unicode-bom */
+import React, { useEffect, useMemo, useState } from 'react';
 import axios from '../../axiosConfig';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import html2canvas from 'html2canvas';
@@ -21,12 +21,7 @@ import {
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, ArcElement, Title, Tooltip, Legend);
 
-const GRAPH_TYPES = [
-  { value: 'stackedBar', label: 'Stacked Bar (Due vs Paid by day)' },
-  { value: 'cumulativeLine', label: 'Cumulative Line (Paid vs Due)' },
-  { value: 'pieStatus', label: 'Pie (Paid vs Unpaid total)' },
-  { value: 'typeBreakdown', label: 'Bill Type Breakdown (by amount)' }
-];
+// GRAPH_TYPES removed (unused) to satisfy lint rules
 
 // Responsive CSS for Reports layout (injected on mount)
 const RESPONSIVE_CSS = `
@@ -60,7 +55,7 @@ function injectResponsiveStyles() {
 }
 
 const Reports = () => {
-  const navigate = useNavigate();
+  // navigate removed (not used)
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState([]);
   const [summary, setSummary] = useState({});
@@ -78,7 +73,6 @@ const Reports = () => {
     return jan1.toISOString().slice(0,10);
   });
   const [endDate, setEndDate] = useState(() => new Date().toISOString().slice(0,10));
-
   const filtered = useMemo(() => {
     const s = startDate ? new Date(startDate) : null;
     const e = endDate ? new Date(endDate) : null;
@@ -90,47 +84,6 @@ const Reports = () => {
       return d >= s && d <= e;
     });
   }, [bills, startDate, endDate]);
-
-  const reload = async () => {
-    setLoading(true);
-    try {
-      // Use new overview endpoint which returns summary, graphs, and detailed_table
-      const params = {};
-      if (startDate && endDate) { params.startDate = startDate; params.endDate = endDate; }
-      const resp = await axios.get('/api/reports/overview', { params });
-      const data = resp && resp.data ? resp.data : {};
-      // Set summary and graphs into state-local variables for rendering (reuse existing memo hooks)
-      setSummary(data.summary || {});
-      setGraphs(data.graphs || {});
-      // detailed_table contains combined paid and pending rows
-      const details = Array.isArray(data.detailed_table) ? data.detailed_table : [];
-      // Normalize detail rows to internal bills array used by existing UI code
-      const normalized = details.map(r => ({
-  id: r.bill_id || r.id,
-        bill_id: r.bill_id || r.id,
-        tenant_id: r.tenant_id,
-        tenant_name: r.tenant_name || null,
-        bill_type: r.bill_type,
-        payment_type: (r.payment_type || (r.bill_type||'').toString().toUpperCase()).toString().toUpperCase(),
-        amount: Number(r.amount) || 0,
-        due_date: r.date || r.due_date || r.paid_at || null,
-  status: (r.status || (r.payment_history_id ? 'paid' : 'pending')),
-  payment_history_id: r.payment_history_id || null
-      }));
-      setBills(normalized);
-    } catch (e) {
-      console.error('Failed to reload bills', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Call reload on mount so the page shows results with the new default date range
-  useEffect(() => {
-  injectResponsiveStyles();
-  reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Prepare chart data for full dataset (hierarchical view)
   const summaryTotals = useMemo(() => {
@@ -185,29 +138,46 @@ const Reports = () => {
       const utilPaid = labels.map(l => map[l].utility_paid);
       return { labels, datasets:[ { label:'Rent Due', data: rentDue, backgroundColor:'#e67e22' }, { label:'Rent Paid', data: rentPaid, backgroundColor:'#2ecc71' }, { label:'Utility Due', data: utilDue, backgroundColor:'#e74c3c' }, { label:'Utility Paid', data: utilPaid, backgroundColor:'#f39c9f' } ] };
     }
-    // daily aggregation
+    // daily aggregation - produce separate Rent/Utility series so both show in chart
     const s = new Date(minD); const e = new Date(maxD);
     const labels = [];
     for (let d = new Date(s); d <= e; d.setDate(d.getDate()+1)) labels.push(new Date(d).toLocaleDateString());
-    const due = new Array(labels.length).fill(0); const paid = new Array(labels.length).fill(0);
-    filtered.forEach(b => { if (!b.due_date) return; const d = new Date(b.due_date); const idx = labels.indexOf(d.toLocaleDateString()); if (idx<0) return; const amt = Number(b.amount)||0; if (b.status==='paid') paid[idx]+=amt; else due[idx]+=amt; });
-    return { labels, datasets:[ { label:'Due', data: due, backgroundColor:'#FF6384' }, { label:'Paid', data: paid, backgroundColor:'#36A2EB' } ] };
+    const rentDue = new Array(labels.length).fill(0);
+    const rentPaid = new Array(labels.length).fill(0);
+    const utilDue = new Array(labels.length).fill(0);
+    const utilPaid = new Array(labels.length).fill(0);
+    filtered.forEach(b => {
+      if (!b.due_date) return;
+      const d = new Date(b.due_date);
+      const idx = labels.indexOf(d.toLocaleDateString());
+      if (idx < 0) return;
+      const amt = Number(b.amount)||0;
+      const pt = (b.payment_type || '').toString().toUpperCase();
+      if (pt === 'UTILITY') {
+        if (b.status === 'paid') utilPaid[idx] += amt; else utilDue[idx] += amt;
+      } else {
+        if (b.status === 'paid') rentPaid[idx] += amt; else rentDue[idx] += amt;
+      }
+    });
+    return { labels, datasets:[ { label:'Rent Due', data: rentDue, backgroundColor:'#e67e22' }, { label:'Rent Paid', data: rentPaid, backgroundColor:'#2ecc71' }, { label:'Utility Due', data: utilDue, backgroundColor:'#e74c3c' }, { label:'Utility Paid', data: utilPaid, backgroundColor:'#f39c9f' } ] };
   }, [filtered]);
 
   const cumulativeLineData = useMemo(() => {
     if (!filtered || filtered.length === 0) return { labels: [], datasets: [] };
     const rows = filtered
-      .filter(b => b.due_date)
-      .map(b => ({ date: new Date(b.due_date), amount: Number(b.amount) || 0, paid: b.status === 'paid' }));
+    .filter(b => b.due_date)
+    // preserve payment_type/bill_type so we can correctly classify rows as RENT or UTILITY
+    .map(b => ({ date: new Date(b.due_date), amount: Number(b.amount) || 0, paid: b.status === 'paid', payment_type: b.payment_type, bill_type: b.bill_type }));
     // sort by date
     rows.sort((a, b) => a.date - b.date);
-    // compute two cumulative series: Rent Collected (from paid rows where payment_type=RENT) and Utility Collected (payment_type=UTILITY)
+    // compute two cumulative series: Rent Collected and Utility Collected
     const rowsByDate = {};
     rows.forEach(r => {
       const label = r.date.toLocaleDateString();
       rowsByDate[label] = rowsByDate[label] || { rent:0, utility:0 };
-      // infer payment_type from row if possible (rows here are from filtered which include payment_type on paid rows)
-      const pt = (r.payment_type || '').toString().toUpperCase() || ((r.bill_type||'').toString().toLowerCase().includes('water')|| (r.bill_type||'').toString().toLowerCase().includes('elect') ? 'UTILITY' : 'RENT');
+      // prefer explicit payment_type, fallback to bill_type text match
+      const ptRaw = (r.payment_type || r.bill_type || '').toString();
+      const pt = ptRaw.toUpperCase().includes('UTILITY') || ptRaw.toLowerCase().includes('water') || ptRaw.toLowerCase().includes('elect') ? 'UTILITY' : 'RENT';
       if (r.paid) {
         if (pt === 'UTILITY') rowsByDate[label].utility += r.amount; else rowsByDate[label].rent += r.amount;
       }
@@ -226,6 +196,54 @@ const Reports = () => {
     const labels = Object.keys(byType);
     return { labels, datasets:[{ data: labels.map(l => byType[l]), backgroundColor: labels.map((_,i)=>`hsl(${(i*60)%360} 70% 50%)`) }] };
   }, [filtered]);
+
+  const reload = async () => {
+    setLoading(true);
+    try {
+      // Use new overview endpoint which returns summary, graphs, and detailed_table
+      const params = {};
+      if (startDate && endDate) { params.startDate = startDate; params.endDate = endDate; }
+      const resp = await axios.get('/api/reports/overview', { params });
+      const data = resp && resp.data ? resp.data : {};
+      // Set summary and graphs into state-local variables for rendering (reuse existing memo hooks)
+      setSummary(data.summary || {});
+      setGraphs(data.graphs || {});
+      // detailed_table contains combined paid and pending rows
+      const details = Array.isArray(data.detailed_table) ? data.detailed_table : [];
+      // Normalize detail rows to internal bills array used by existing UI code
+      const normalized = details.map(r => ({
+  id: r.bill_id || r.id,
+        bill_id: r.bill_id || r.id,
+        tenant_id: r.tenant_id,
+        tenant_name: r.tenant_name || null,
+        bill_type: r.bill_type,
+        // normalize payment_type to canonical values: 'UTILITY' or 'RENT'
+        payment_type: (() => {
+          const raw = (r.payment_type || r.bill_type || '').toString();
+          const up = raw.toUpperCase();
+          if (up.includes('WATER') || up.includes('ELECT') || up.includes('UTILITY')) return 'UTILITY';
+          return 'RENT';
+        })(),
+        amount: Number(r.amount) || 0,
+        due_date: r.date || r.due_date || r.paid_at || null,
+  status: (r.status || (r.payment_history_id ? 'paid' : 'pending')),
+  payment_history_id: r.payment_history_id || null
+      }));
+      setBills(normalized);
+    } catch (e) {
+      console.error('Failed to reload bills', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Call reload on mount so the page shows results with the new default date range
+  useEffect(() => {
+  injectResponsiveStyles();
+  reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // export helpers
   const exportCSV = () => {
@@ -488,11 +506,19 @@ const Reports = () => {
             {(() => {
               const groups = { RENT: [], ELECTRICITY: [], WATER: [], OTHER: [] };
               filteredByType.forEach(row => {
+                // Prefer bill_type text to place into Electricity/Water groups
+                const billType = (row.bill_type || '').toString().toLowerCase();
                 const pt = (row.payment_type || '').toString().toUpperCase();
-                if (pt === 'RENT') groups.RENT.push(row);
-                else if (pt === 'ELECTRICITY') groups.ELECTRICITY.push(row);
-                else if (pt === 'WATER') groups.WATER.push(row);
-                else groups.OTHER.push(row);
+                if (billType.includes('water')) {
+                  groups.WATER.push(row);
+                } else if (billType.includes('elect') || billType.includes('electric')) {
+                  groups.ELECTRICITY.push(row);
+                } else if (pt === 'RENT' || billType.includes('rent')) {
+                  groups.RENT.push(row);
+                } else {
+                  // fallback: if marked utility but type unknown, consider it Other (pass-through unspecified)
+                  groups.OTHER.push(row);
+                }
               });
 
               const renderGroup = (title, items, badge) => (

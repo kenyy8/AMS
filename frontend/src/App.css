@@ -1,1 +1,807 @@
+/* ==========================
+  GLOBAL / SHARED STYLES
+  (variables and foundational tokens used across the app)
+  ========================== */
+:root{
+	--header-bg: rgba(255,255,255,0.92);
+	--header-border: rgba(15,23,42,0.06);
+	--brand-color: #0f172a;
+	--app-header-height: 64px;
+	--card-bg: #ffffff;
+	--card-radius: 10px;
+	--card-shadow: 0 8px 24px rgba(2,6,23,0.06);
+	--content-bg: #f6f7f9;
 
+	/* Hero palette */
+	--hero-grad-1: #3b82f6; /* blue */
+	--hero-grad-2: #06b6d4; /* teal */
+	--hero-grad-3: #34d399; /* green */
+	--hero-overlay: rgba(7,10,23,0.12);
+}
+
+/* ==========================
+  HEADER / NAVIGATION
+  ========================== */
+/* Header surface */
+.header-surface{
+	background: var(--header-bg);
+	border-bottom: 1px solid var(--header-border);
+	backdrop-filter: blur(6px);
+}
+
+.navbar-custom .navbar-brand.navbar-center-brand{
+	font-weight:700;
+	color:var(--brand-color);
+	letter-spacing:0.02em;
+}
+
+.navbar-custom .nav-link{
+	color: rgba(15,23,42,0.75);
+	margin-left: 0.6rem;
+	margin-right: 0.6rem;
+}
+
+.navbar-small{ padding: .55rem 0; }
+
+.app-container{ width:100%; max-width:none; margin:0 auto; padding:0 18px; box-sizing:border-box; }
+
+/* Ensure full-height layout so we can keep the header fixed and content scrollable beneath it */
+html, body, #root{ height:100%; margin:0; padding:0; }
+/* prevent double viewport scroll; make the main content area scrollable instead */
+body{ overflow:hidden; }
+
+/* Global full-window background image layer (visual only) */
+/* Image source is provided via JS in `App.js` as the CSS var --ams-bg */
+body::before{
+	content: "";
+	position: fixed;
+	inset: 0;
+	background-image: var(--ams-bg);
+	background-repeat: no-repeat;
+	background-size: cover;
+	background-position: center center;
+	z-index: -9999; /* always behind app content */
+		opacity: 0; /* hidden by default */
+	pointer-events: none;
+	transition: opacity 220ms ease;
+}
+/* Only show the AMS background on selected pages */
+body.show-ams-bg::before{ opacity: 1; }
+
+/* Default app background for other pages: subtle blue gradient */
+body{ background: linear-gradient(180deg, #e6f0ff 0%, #f8fbff 100%); }
+
+/* Ensure background image is fully visible on authentication pages */
+body.auth-page::before{ opacity: .8; }
+
+/* Ensure the background doesn't create white margins on resize */
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+
+/* Override older hero/gradient backgrounds so the global image shows through */
+.hero-center{ background: transparent !important; }
+.hero-center::after{ display: none !important; }
+
+/* Make the hero title readable on top of the background */
+.hero-center .card-glass h1{ color: #0f172a !important; text-align:center; }
+
+/* Improve hero centering used on Home */
+.hero-center { 
+	display:flex; 
+	align-items:center; 
+	justify-content:center; 
+	min-height:68vh; 
+	padding:56px 20px 72px; 
+	background: linear-gradient(110deg, var(--hero-grad-1) 0%, var(--hero-grad-2) 52%, var(--hero-grad-3) 100%);
+	color: #fff;
+	position:relative;
+	overflow:hidden;
+}
+
+.hero-center::after{
+	content: "";
+	position:absolute;
+	left:0; right:0; top:0; bottom:0;
+	background: radial-gradient(800px 300px at 85% 10%, rgba(255,255,255,0.06), transparent 30%), linear-gradient(180deg, var(--hero-overlay), transparent 40%);
+	pointer-events:none;
+}
+
+/* Container narrow */
+.container-narrow{ width:100%; max-width:1200px; margin:0 auto; position:relative; padding:0 12px; box-sizing:border-box; }
+
+/* Glass card used on Home */
+.card-glass {
+  background: rgba(255, 255, 255, 0.18); /* Transparent frosted glass */
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  
+  box-shadow: 0 8px 32px rgba(2, 6, 23, 0.25);
+  
+  padding: 20px;
+  /* No hover or movement for the container */
+}
+
+/* Hero inner title styles */
+.hero-center .card-glass h1{ color:#0f172a; font-weight:700; margin-bottom:6px; }
+.hero-center .card-glass p{ color: #4b5563; margin-bottom:18px; }
+
+/* Two-column cards row */
+.card-row{ display:grid; grid-template-columns: repeat(2, 1fr); gap:26px; align-items:stretch; width:100%; }
+.card-glass { position: relative; overflow: visible; }
+.card-top-bar{ height:18px; border-top-left-radius:14px; border-top-right-radius:14px; position:absolute; left:0; right:0; top:-18px; box-shadow: 0 6px 18px rgba(2,6,23,0.06); }
+.card-glass.left .card-top-bar{ background: linear-gradient(90deg,#8b5cf6,#a78bfa); }
+.card-glass.right .card-top-bar{ background: linear-gradient(90deg,#34d399,#86efac); }
+.card-inner{ padding:18px; }
+.card-glass .card-content{ padding:26px 24px 28px; text-align:center; }
+.card-left-icon{ position:absolute; left:20px; top:34px; font-size:46px; opacity:0.96; }
+.card-right-illustration{ position:absolute; right:20px; top:18px; font-size:56px; transform:translateY(0); }
+.card-glass .card-icon{ font-size:36px; margin-bottom:8px; }
+.card-glass h3{ margin:0 0 6px; font-size:20px; color:#0f172a; }
+.card-glass .muted{ color:#6b7280; margin-bottom:14px; }
+
+/* Buttons */
+.btn{ padding:12px 22px; border-radius:10px; font-weight:700; cursor:pointer; border:0; box-shadow: 0 8px 20px rgba(2,6,23,0.12); }
+.btn-primary{ background: linear-gradient(90deg,#7c3aed,#06b6d4); color:#fff; }
+.btn-success{ background: linear-gradient(90deg,#10b981,#059669); color:#fff; }
+.btn:active{ transform:translateY(1px); }
+
+/* Features row */
+.features-row{ margin-top:22px; display:grid; grid-template-columns: repeat(4,1fr); gap:12px; color:#475569; font-size:13px; text-align:center; align-items:start; }
+.feature-pill{ background:transparent; padding:6px 8px; }
+.feature-circle{ width:88px; height:88px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; border:6px solid rgba(255,255,255,0.28); margin:0 auto; background:transparent; box-shadow: 0 8px 28px rgba(2,6,23,0.12); }
+.feature-label{ margin-top:10px; font-size:13px; color:#ffffff; }
+.feature-pill .icon{ font-size:28px; display:block; }
+
+/* Footer */
+.site-footer{ margin-top:28px; background:transparent; color: rgba(255,255,255,0.88); padding:18px 12px; border-radius:8px; text-align:center; }
+
+/* Manager dashboard specific styles */
+.mgr-dashboard {
+	display:block; /* force single-column centered layout */
+}
+
+/* left nav (removed: sidebar moved to top/persistent header) */
+
+/* main content area */
+.mgr-main { flex:1; padding:20px 28px; background:#f6f7f9; }
+.mgr-topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+.mgr-topbar h1{ margin:0; font-size:18px; color:#0f172a; font-weight:700; }
+
+/* top compact navigation that replaces the sidebar */
+.mgr-topnav-wrap{ display:flex; justify-content:center; position:fixed; left:0; right:0; top:8px; z-index:999; padding-top:8px; pointer-events:none; }
+.mgr-topnav{ display:flex; align-items:center; justify-content:center; gap:8px; padding:8px 10px; background:#fff; border-radius:12px; box-shadow: 0 10px 30px rgba(2,6,23,0.08); border:1px solid rgba(15,23,42,0.06); pointer-events:auto; }
+.mgr-topnav .brand{ font-weight:700; color:var(--brand-color); font-size:14px; margin-right:8px; }
+.mgr-topnav-items{ display:flex; gap:6px; align-items:center; }
+
+/* small label next to icons for clarity on larger screens */
+.topnav-item .label { display:none; margin-left:6px; font-size:13px; }
+.topnav-item:hover .label, .topnav-item.active .label { display:inline-block; }
+.topnav-item{ display:inline-flex; align-items:center; justify-content:center; width:40px; height:40px; border-radius:8px; background:transparent; border:none; cursor:pointer; color:#374151; transition: background 120ms, transform 80ms; }
+.topnav-item svg{ opacity:0.95; }
+.topnav-item:hover, .topnav-item:focus{ background:rgba(15,23,42,0.03); outline:none; }
+.topnav-item.active{ background:linear-gradient(90deg, rgba(99,102,241,0.12), rgba(99,102,241,0.04)); color: #4f46e5; box-shadow: 0 2px 8px rgba(79,70,229,0.08); transform: translateY(-1px); }
+.sr-only{ position:absolute; left:-10000px; top:auto; width:1px; height:1px; overflow:hidden; }
+
+/* avoid overlap between sticky topnav and main content */
+.mgr-main { width:100%; max-width:none; margin:0 auto; padding:16px 28px 20px; background:var(--content-bg); box-sizing:border-box; position:relative; height:100%; min-height:0; }
+
+/* Create a scrollable content wrapper so the viewport scrollbar won't overlap the header */
+.app-content-scroll{ position:fixed; top:var(--app-header-height); left:0; right:0; bottom:0; overflow:auto; -webkit-overflow-scrolling:touch; }
+
+/* ensure root/body do not introduce extra scrolling */
+html, body, #root { height: 100%; overflow: hidden; }
+
+.app-header{ width:100%; background: linear-gradient(180deg,#2d3748,#111827); color:#fff; height:var(--app-header-height); padding:0; position:fixed; top:0; left:0; right:0; z-index:1200; box-shadow: 0 8px 28px rgba(2,6,23,0.32); display:flex; align-items:center; }
+.app-header-inner{ width:100%; max-width:none; margin:0 auto; display:flex; align-items:center; justify-content:space-between; padding:0 18px; height:100%; }
+.brand-left{ display:flex; align-items:center; gap:10px; }
+.brand-mark{ width:32px; height:32px; display:flex; align-items:center; justify-content:center; border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.28); }
+.brand-text{ font-weight:800; color:#e6eefc; letter-spacing:0.04em; font-size:14px; text-transform:uppercase; }
+.header-actions{ display:flex; align-items:center; gap:10px; }
+.btn-ghost{ background:transparent; color:rgba(255,255,255,0.9); border:0; padding:8px 10px; border-radius:8px; }
+
+.center-nav-wrap{ display:none; /* center nav moved to top header; keep rules for reference */ }
+.center-nav{ display:none; }
+.center-nav .center-nav-item{ background:#fff; border-radius:12px; padding:12px 18px; border:1px solid rgba(15,23,42,0.06); box-shadow: 0 6px 18px rgba(2,6,23,0.04); display:flex; gap:10px; align-items:center; color:#374151; cursor:pointer; }
+.center-nav .center-nav-item svg{ opacity:0.9 }
+.center-nav .center-nav-label{ margin-left:6px; font-weight:600; color:#475569; }
+.center-nav .center-nav-item.active{ color:#0f172a; box-shadow:none; border-color:transparent; position:relative; }
+.center-nav .center-nav-item.active::after{ content:''; position:absolute; left:12px; right:12px; bottom:-12px; height:4px; border-radius:4px; background:linear-gradient(90deg,#4f46e5,#06b6d4); }
+
+/* stat tiles */
+.mgr-stats{ display:flex; gap:14px; margin-bottom:14px; }
+.stat-tile{ flex:1; background:#fff; border-radius:6px; padding:14px 16px; box-shadow: 0 6px 18px rgba(2,6,23,0.03); border:1px solid rgba(15,23,42,0.04); }
+.stat-tile .num{ font-weight:700; font-size:18px; color:#111827; }
+.stat-tile .label{ color:#6b7280; font-size:13px; margin-top:6px; }
+.stat-tile .chip{ display:inline-block; padding:8px 12px; border-radius:6px; font-weight:700; color:#fff; }
+.chip.overdue{ background:#ef4444; }
+.chip.outstanding{ background:#10b981; }
+
+/* panels */
+.panel{ background:#fff; border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.03); border:1px solid rgba(15,23,42,0.04); margin-bottom:16px; }
+.panel .panel-header{ padding:10px 14px; border-bottom:1px solid rgba(15,23,42,0.04); display:flex; justify-content:space-between; align-items:center; }
+.panel .panel-header h5{ margin:0; font-size:15px; font-weight:700; }
+.panel .panel-body{ padding:12px 14px; }
+
+/* table tweaks */
+.panel table.table{ margin-bottom:0; }
+.panel table.table thead th{ font-weight:700; font-size:13px; color:#111827; border-bottom:1px solid rgba(15,23,42,0.06); }
+.panel table.table tbody td{ vertical-align:middle; }
+
+/* prevent tables and cards from shrinking too small on narrow viewports */
+.panel { min-width: 280px; }
+.panel .table-responsive{ overflow:auto; }
+.panel table.table { min-width: 520px; }
+.card { min-width: 260px; }
+
+@media (max-width: 720px){
+	.panel table.table { min-width: 100%; }
+	.panel .table-responsive { overflow-x: auto; }
+}
+
+/* badges */
+.badge-type{ background:#60a5fa; color:#fff; padding:6px 10px; border-radius:6px; font-size:12px; }
+.badge-status.online{ background:#10b981; }
+.badge-status.offline{ background:#ef4444; }
+
+/* utility status badges (consistent look) */
+.status-badge{ display:inline-block; padding:6px 10px; border-radius:8px; color:#fff; font-weight:700; font-size:12px; }
+.status-badge.active{ background: #10b981; }
+.status-badge.offline{ background: #ef4444; }
+.status-badge.unknown{ background: #6b7280; }
+
+/* ensure tables inside fluid containers don't overflow awkwardly */
+.table-responsive{ overflow-x:auto; }
+
+/* quick actions */
+.quick-actions .btn{ border-radius:8px; box-shadow:none; font-weight:700; }
+
+/* header quick actions (compact toolbar inside dark header) */
+.quick-actions-header{ display:flex; gap:8px; align-items:center; }
+.quick-actions-header .qa-btn{ display:inline-flex; align-items:center; gap:8px; padding:8px 10px; background:rgba(255,255,255,0.06); color:#fff; border:1px solid rgba(255,255,255,0.06); border-radius:8px; cursor:pointer; font-weight:700; transition: background 140ms, transform 80ms; }
+.quick-actions-header .qa-btn svg{ opacity:0.95; }
+.quick-actions-header .qa-btn .qa-label{ display:none; font-weight:700; color:rgba(255,255,255,0.95); }
+.quick-actions-header .qa-btn:hover{ background:rgba(255,255,255,0.12); transform:translateY(-1px); }
+.quick-actions-header .qa-btn.active{ background:linear-gradient(90deg, rgba(79,70,229,0.18), rgba(6,182,212,0.12)); box-shadow: 0 6px 18px rgba(2,6,23,0.12); color:#fff; }
+
+@media (min-width: 900px){
+	.quick-actions-header .qa-btn .qa-label{ display:inline-block; }
+}
+
+/* footer thin */
+.mgr-footer{ margin-top:24px; background:#fff; padding:10px 12px; border-radius:8px; text-align:center; color:#6b7280; border:1px solid rgba(15,23,42,0.03); }
+
+/* reports grid */
+.reports-root .small-controls .form-control-sm, .reports-root .form-select-sm{ min-width:140px; }
+/* Centered 2x2 grid for reports on larger screens */
+.reports-grid{ display:grid; grid-template-columns: repeat(2, 1fr); gap:22px; align-items:stretch; justify-content:stretch; width:100%; max-width:1600px; margin:0 auto; padding:0 18px; box-sizing:border-box; }
+.report-card{ background: linear-gradient(180deg, rgba(255,255,255,0.85), rgba(255,255,255,0.78)); border-radius:14px; border: 1px solid rgba(255,255,255,0.6); backdrop-filter: blur(6px); overflow:visible; }
+.report-card .card-body{ padding:18px; }
+.report-card.summary{ min-width:300px; }
+.report-card.small-chart .card-body{ padding:18px; }
+.report-card h4, .report-card .h4{ font-size:1.6rem; }
+
+.report-card .text-muted.small{ color: rgba(15,23,42,0.5); }
+
+@media (max-width:720px){
+	.reports-grid{ grid-template-columns: 1fr; }
+}
+
+/* ensure charts are visible without internal scroll */
+.report-chart{ height:420px; display:flex; align-items:center; justify-content:center; }
+.report-card.type-breakdown .report-chart{ height:480px; }
+.reports-root .card, .report-card{ overflow:visible; }
+
+@media (max-width:1000px){
+ 	.reports-grid{ grid-template-columns: 1fr; }
+ 	.report-chart{ height:260px; }
+ 	.report-card.type-breakdown .report-chart{ height:300px; }
+}
+
+/* center cards on very large screens */
+@media (min-width: 1200px){
+  .reports-grid{ max-width:1200px; }
+  .report-card{ border-radius:16px; }
+}
+
+/* interactive card and modal */
+.report-card[role="button"]{ cursor:pointer; transition: transform 140ms ease, box-shadow 140ms ease; }
+.report-card[role="button"]:hover{ transform: translateY(-6px); box-shadow: 0 20px 40px rgba(2,6,23,0.08); }
+
+.overlay-modal{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; z-index:1200; }
+.overlay-backdrop{ position:absolute; inset:0; background: rgba(2,6,23,0.48); }
+.overlay-panel{ position:relative; width:92%; max-width:1400px; background: #fff; border-radius:12px; padding:18px; z-index:1210; box-shadow:0 30px 80px rgba(2,6,23,0.2); overflow:hidden; }
+.overlay-panel .btn{ min-width:80px; }
+
+@media (max-width: 992px){
+	.mgr-main{ padding:12px; }
+	.mgr-stats{ flex-direction:column; }
+}
+
+/* adjust hero title color for white on gradient */
+.hero-center .card-glass h1{ color:#ffffff; }
+.hero-center .card-glass p{ color: rgba(255,255,255,0.95); }
+
+/* Small screens */
+@media (max-width: 720px){
+	.card-row{ grid-template-columns: 1fr; }
+	.features-row{ grid-template-columns: repeat(2,1fr); }
+	.hero-center{ min-height: auto; padding: 28px 12px; }
+}
+
+/* Buttons */
+.btn-primary-custom{ background: linear-gradient(180deg,#06b6d4,#0891b2); color:#fff; border:0; }
+
+/* NOTE: navbar visibility intentionally left to app logic; do not force hide here */
+
+/* --- Custom header pill nav (screenshot match) --- */
+.navbar-gradient{ background: linear-gradient(180deg,#0f1724,#0b1220); }
+.app-header { padding:12px 0; }
+.brand-mark{ width:34px; height:34px; background:linear-gradient(135deg,#06b6d4,#7c3aed); border-radius:6px; box-shadow: 0 6px 18px rgba(2,6,23,0.32); }
+.brand-text{ color:#e6eefc; font-weight:800; letter-spacing:0.02em; }
+
+.nav-center{ gap:10px; }
+.nav-pill{ display:inline-block; padding:10px 16px; border-radius:10px; background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.85); text-decoration:none; font-weight:700; box-shadow: inset 0 -2px 0 rgba(0,0,0,0.06); transition: all 160ms ease; border: 1px solid rgba(255,255,255,0.03); }
+.nav-pill:hover{ transform: translateY(-2px); background: rgba(255,255,255,0.06); }
+.nav-pill.active{ background: linear-gradient(90deg, rgba(79,70,229,0.18), rgba(6,182,212,0.06)); color:#fff; box-shadow: 0 6px 18px rgba(2,6,23,0.22); border-color: rgba(79,70,229,0.12); }
+
+.nav-right .nav-utility{ background:transparent; border:0; color: rgba(255,255,255,0.88); padding:8px 10px; border-radius:8px; cursor:pointer; }
+.nav-right .nav-utility:hover{ background: rgba(255,255,255,0.04); transform: translateY(-1px); }
+
+/* subtle bottom shadow edge like screenshot */
+.app-header { box-shadow: 0 8px 28px rgba(2,6,23,0.32); }
+
+@media (max-width: 900px){
+	.nav-center{ display:none !important; }
+	.nav-right{ display:none !important; }
+}
+
+/* Mobile menu overlay/panel (used by Navbar mobile) */
+.mobile-nav-backdrop{ position:fixed; inset:0; background: rgba(0,0,0,0.36); display:flex; align-items:flex-start; justify-content:flex-end; padding:12px; z-index:1300; }
+.mobile-nav-panel{ background: linear-gradient(180deg,#ffffff,#fbfdff); width:320px; max-width:92%; border-radius:12px; box-shadow: 0 20px 60px rgba(2,6,23,0.32); padding:12px; overflow:auto; }
+.mobile-nav-header{ padding:8px 6px; border-bottom:1px solid rgba(15,23,42,0.04); }
+.mobile-nav-items{ display:flex; flex-direction:column; gap:6px; padding:10px 6px; }
+.mobile-nav-item{ display:block; padding:12px 10px; border-radius:8px; color:#0f172a; text-decoration:none; font-weight:700; border:1px solid rgba(15,23,42,0.04); background:transparent; }
+.mobile-nav-item.active, .mobile-nav-item:hover{ background: linear-gradient(90deg, rgba(79,70,229,0.08), rgba(6,182,212,0.04)); color:#111827; }
+.mobile-nav-footer{ padding:10px 6px; border-top:1px solid rgba(15,23,42,0.04); }
+
+/* small tweak for the small 'Menu' pill in header */
+.nav-pill.small{ padding:8px 10px; font-size:14px; }
+
+/* ==========================
+	 Unified visual system
+	 - consistent card, panel, button, and typography styles
+	 - ensures Dashboard, Bills, Tenants, Apartments, Meter pages match
+	 ========================== */
+
+/* Card / Panel base */
+.card-base, .panel, .report-card, .stat-tile{ background: var(--card-bg); border-radius: var(--card-radius); box-shadow: var(--card-shadow); border: 1px solid rgba(15,23,42,0.04); }
+.panel{ border-radius: var(--card-radius); box-shadow: var(--card-shadow); }
+.panel .panel-header{ padding:16px; border-bottom:1px solid rgba(15,23,42,0.05); }
+.panel .panel-body{ padding:18px; }
+
+/* make tables consistent inside cards */
+.panel table.table thead th{ font-weight:700; color:#111827; }
+.panel table.table tbody td{ padding:12px 10px; }
+
+/* Card spacing/layout */
+.card-row, .reports-grid{ gap:20px; }
+.panel{ margin-bottom:22px; }
+
+/* Buttons consistent */
+.btn, .btn-primary, .btn-success{ border-radius:8px; font-weight:700; }
+.btn-secondary, .btn-outline-secondary, .btn-sm{ border-radius:8px; }
+
+/* Typography adjustments */
+h1, .mgr-topbar h1{ font-weight:700; color:#0f172a; }
+body, input, select, textarea{ font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, 'Helvetica Neue', Arial; color:#111827; }
+
+/* Ensure consistent margins inside main content */
+.mgr-main .panel, .mgr-main .stat-tile { margin-left:0; margin-right:0; }
+
+/* Responsive tweaks: ensure cards stack nicely on small screens */
+@media (max-width: 900px){
+	.card-row, .reports-grid{ grid-template-columns: 1fr; }
+	.app-header-inner{ padding:0 12px; }
+	.app-container{ padding:0 12px; }
+}
+
+/* Utility: put main content under header; app components should wrap content in .app-content-scroll */
+.app-root-full{ min-height:100%; display:flex; flex-direction:column; }
+
+/* Small layout tweaks to match the reference design */
+.mdm-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+.mdm-toolbar .mdm-center { text-align: center; }
+.mdm-search { margin-bottom: 1rem; }
+.mdm-table th, .mdm-table td { text-align: center; vertical-align: middle; }
+.mdm-paused { color: #6c757d; opacity: 0.75; }
+.mdm-create-btn { padding: 6px 12px; }
+.mdm-group-title { margin: 0 0 0.5rem 0; font-weight: 600; }
+.mdm-card-header { display:flex; align-items:center; justify-content:space-between; }
+.mdm-rate-small { font-size: 13px; color: #333; }
+
+/* Icon button for compact action icons in tables */
+.mdm-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 30px;
+	padding: 0;
+}
+.mdm-icon-btn span { font-size: 14px; line-height: 1; }
+
+/* Center the top summary cards beneath the nav bar */
+.pm-summary-row {
+  display: flex;
+  justify-content: center; /* horizontally center */
+  gap: 1rem;
+  padding: 0.75rem 0; /* breathing room under nav */
+  flex-wrap: wrap;
+}
+
+.pm-summary-card {
+  min-width: 140px;
+  max-width: 200px;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(20,20,30,0.06);
+  text-align: center;
+  padding: 0.8rem 1rem;
+}
+
+/* Modal overlay and centering */
+.pm-modal-backdrop-centered {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center; /* vertical center */
+  justify-content: center; /* horizontal center */
+  background: rgba(0,0,0,0.45);
+  z-index: 3000; /* above nav and content */
+  padding: 1rem; /* ensure some spacing on small screens */
+}
+
+.pm-modal-centered {
+  width: 100%;
+  max-width: 980px;
+  background: var(--card-bg, #fff);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+  overflow: hidden;
+}
+
+/* Toolbar above the Monthly Income chart */
+.pm-chart-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.pm-chart-toolbar .left-controls { display: flex; gap: 0.5rem; align-items: center; }
+.pm-chart-toolbar .range-btn { padding: 0.35rem 0.6rem; border-radius: 4px; border: 1px solid rgba(0,0,0,0.08); background: transparent; cursor: pointer; }
+.pm-chart-toolbar .range-btn.active { background: rgba(0,0,0,0.06); }
+.pm-chart-toolbar .view-more { margin-left: 0.75rem; }
+
+/* Chart sizing inside modal */
+.pm-modal-chart { width: 100%; height: 420px; }
+
+/* Slightly taller dashboard charts to match increased card heights */
+.pm-dashboard-chart { width: 100%; height: 240px; }
+
+/* Chart card wrapper to allow internal controls (view more button) */
+.pm-chart-card { position: relative; }
+.pm-chart-card .pm-view-more-btn {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  z-index: 3;
+}
+
+/* Ensure button doesn't overlap content on small screens */
+@media (max-width: 576px) {
+  .pm-chart-card .pm-view-more-btn { top: 0.4rem; right: 0.4rem; padding: 0.25rem 0.5rem; }
+  .pm-dashboard-chart { height: 140px; }
+}
+
+/* Embedded toolbar inside the chart card header */
+.pm-chart-embedded-toolbar {
+  /* kept for backward compatibility but the preferred inline toolbar is .pm-chart-embedded-toolbar-inline */
+  display: none;
+}
+
+.pm-chart-embedded-toolbar-inline {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.pm-chart-embedded-toolbar-inline .range-btn {
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(0,0,0,0.08);
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+}
+.pm-chart-embedded-toolbar-inline .range-btn.active { background: #f8f9ff; border-color: #6c5ce7; color: #2b2a73; }
+.pm-chart-embedded-toolbar-inline input[type="date"] { max-width: 130px; padding: 0.28rem 0.38rem; border-radius: 4px; border: 1px solid rgba(0,0,0,0.08); }
+
+/* header baseline tweaks */
+.card-header .h5 { line-height: 1; }
+.card-header .text-muted.small { line-height: 1; }
+
+/* Card header polish to match reference look */
+.card.panel { border-radius: 8px; box-shadow: 0 8px 24px rgba(20,20,30,0.06); }
+.card-header { background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(245,245,246,0.98)); padding: 0.9rem 1rem; border-bottom: 1px solid rgba(0,0,0,0.04); }
+.card-body { padding: 1rem; }
+
+/* Toolbar buttons: subtle rounded pills */
+.range-btn { background: white; border: 1px solid rgba(0,0,0,0.08); padding: 0.4rem 0.65rem; border-radius: 6px; cursor: pointer; }
+.range-btn:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.04); }
+
+/* View More button style inside header */
+.card-header .btn-outline-primary { border-radius: 8px; padding: 0.35rem 0.6rem; }
+
+/* Align chart area spacing */
+.pm-chart-card .card-body { padding-top: 0.5rem; }
+
+/* Responsive: make chart header compact on narrow screens */
+@media (max-width: 768px) {
+  .pm-summary-card { min-width: 120px; max-width: 160px; }
+  .pm-dashboard-chart { height: 140px; }
+  .card-header { padding: 0.6rem 0.8rem; }
+}
+/* Mini analytics cards grid and compact sizing */
+.pm-charts-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; align-items: start; }
+.pm-charts-grid .pm-mini-chart { display: flex; flex-direction: column; justify-content: space-between; border-radius: 8px; box-shadow: 0 6px 18px rgba(20,20,30,0.05); padding: 0.6rem; height: 200px; min-height: 200px; overflow: hidden; }
+.pm-charts-grid .pm-mini-chart > .d-flex:first-child { padding-bottom: 0.25rem; }
+.pm-charts-grid .pm-mini-chart .pm-mini-chart-body { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 4px 6px; }
+.pm-charts-grid .pm-mini-chart .pm-mini-chart-body > div { width: 100%; }
+.pm-charts-grid .pm-mini-chart .pm-mini-chart-chart { height: 120px; width: 100%; }
+.pm-charts-grid .pm-mini-chart .text-muted.small { margin: 0; }
+.pm-charts-grid .pm-mini-chart .h6, .pm-charts-grid .pm-mini-chart .h5 { margin: 0; }
+
+@media (max-width: 1199px) {
+  .pm-charts-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 575px) {
+  .pm-charts-grid { grid-template-columns: 1fr; }
+  .pm-charts-grid { grid-template-columns: 1fr; }
+  .pm-charts-grid .pm-mini-chart { min-height: 160px; height: 160px; }
+  .pm-charts-grid .pm-mini-chart .pm-mini-chart-chart { height: 100px; }
+}
+.pm-chart-embedded-toolbar .range-btn {
+  background: rgba(255,255,255,0.95);
+  border: 1px solid rgba(0,0,0,0.08);
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.pm-chart-embedded-toolbar .range-btn.active {
+  background: #f8f9ff;
+  border-color: #6c5ce7;
+  color: #2b2a73;
+}
+.pm-chart-embedded-toolbar input[type="date"] { padding: 0.28rem 0.38rem; border-radius: 4px; border: 1px solid rgba(0,0,0,0.08); background: white; }
+
+@media (max-width: 576px) {
+  .pm-chart-embedded-toolbar { left: 0.5rem; top: 0.5rem; gap: 0.25rem; }
+  .pm-chart-embedded-toolbar .range-btn { padding: 0.28rem 0.45rem; }
+}
+
+/* Make date inputs a bit narrower and prevent overlap */
+.pm-chart-embedded-toolbar input[type="date"] { max-width: 130px; }
+.pm-chart-embedded-toolbar input[type="date"]::-webkit-calendar-picker-indicator { padding: 4px; }
+
+/* Give chart card top padding so the internal title aligns with the Recent Bills header */
+.pm-chart-card { padding-top: 0; }
+
+/* Center the summary cards row under the nav */
+.center-nav-wrap .center-nav { display: flex; justify-content: center; }
+.pm-summary-row { justify-content: center; }
+
+/* Ensure the chart and recent bills headers align horizontally and cards match height */
+.row.align-items-start.mb-4 { display: flex; gap: 1rem; align-items: flex-start; }
+.row.align-items-start.mb-4 > .col-lg-6 { display: flex; flex-direction: column; flex: 1 1 0; min-width: 0; }
+.row.align-items-start.mb-4 > .col-lg-6 > div { width: 100%; display: flex; flex-direction: column; }
+
+
+/* Ensure modal stays centered when the page is scrolled */
+@media (max-height: 600px) {
+  .pm-modal-backdrop-centered { align-items: flex-start; padding-top: 2rem; }
+}
+
+/* Tighten top cards: remove horizontal gap and force equal heights so Monthly Income sits flush with Recent Bills */
+.pm-top-cards { display: flex; gap: 0.25rem; align-items: stretch; }
+.pm-top-cards > .card { flex: 1 1 0; display: flex; flex-direction: column; margin: 0; border-radius: 8px; }
+.pm-top-cards > .card .card-body { flex: 1 1 auto; }
+
+/* Small inner padding adjustments to eliminate visible gutter */
+.pm-chart-card { padding-right: 0.25rem !important; }
+.pm-recent-bills-card { padding-left: 0.25rem !important; }
+
+/* Make recent bills card body match chart height for visual alignment - use flex so paired cards stretch equally */
+.card.panel { display: flex; flex-direction: column; }
+.card.panel > .card-body { flex: 1 1 auto; }
+/* Keep recent bills content top-aligned so headers and content align with the chart card */
+.card.panel .card-body.recent-bills-body { display: flex; flex-direction: column; justify-content: flex-start; }
+
+/* Make the inner card-glass inside the chart card stretch and remove extra inner padding so chart lines up with Recent Bills */
+.pm-chart-card .card.card-glass { padding: 0 !important; margin: 0; display: flex; flex-direction: column; flex: 1 1 auto; background: transparent; }
+.pm-chart-card .pm-dashboard-chart { flex: 1 1 auto; height: 100% !important; min-height: 240px; }
+
+/* Top KPI cards: slightly taller and vertically centered content so all cards appear visually consistent */
+.pm-kpi-card { min-height: 120px; display: flex; flex-direction: column; justify-content: center; }
+
+/* Slight header padding parity to ensure both headers visually align */
+.pm-chart-card .card-header, .card.panel > .card-header { padding-top: 0.82rem; padding-bottom: 0.82rem; }
+
+/* Ensure headers align baseline-wise */
+.pm-top-cards .card-header { display: flex; align-items: center; justify-content: space-between; }
+
+/* Status badge containers for Recent Bills */
+.pm-status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.6rem;
+  border-radius: 12px;
+  color: #222;
+  font-weight: 600;
+  font-size: 0.85rem;
+  min-width: 72px;
+  text-align: center;
+}
+.pm-status-paid { background: #d4edda; border: 1px solid #c3e6cb; color: #155724; }
+.pm-status-pending { background: #fff3cd; border: 1px solid #ffeeba; color: #856404; }
+.pm-status-overdue { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; }
+
+/* Recent Bills table alignment helpers */
+.pm-recent-bills-table td.amount-col, .pm-recent-bills-table th.amount-col { text-align: right; }
+.pm-recent-bills-table td.status-col { text-align: right; vertical-align: middle; }
+
+/* Device table styling */
+.device-table th, .device-table td { text-align: center; vertical-align: middle; }
+.device-table th { font-weight: 600; }
+.device-table td { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+
+/* Visual styles for bill groups */
+.bill-group-card {
+  border-radius: 8px;
+  padding: 12px;
+  overflow: hidden; /* ensure inner table backgrounds don't escape rounded corners */
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
+.bill-group-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.bill-group-icon { font-size: 18px; }
+.bill-group-electricity { background-color: #fff9e6; }
+.bill-group-water { background-color: #e9f6ff; }
+.bill-group-rent { background-color: #edfcea; }
+
+/* table cell adjustments for consistent vertical alignment */
+.bill-group-card .table td,
+.bill-group-card .table th {
+  vertical-align: middle;
+}
+
+/* ensure the tenant cell aligns the icon and text cleanly */
+.bill-row-icon { width: 22px; display: inline-flex; align-items: center; justify-content: center; margin-right: 10px; }
+
+/* tighten checkbox cell spacing */
+.bill-group-card .table td:first-child, .bill-group-card .table th:first-child {
+  padding-left: 10px; padding-right: 10px; width: 36px; text-align: center;
+}
+
+/* Stretch the inner table to the edges of the group card so row backgrounds align visually
+   with group background and don't leave an inset gap on the left */
+.bill-group-card .table-responsive {
+  margin: 0; /* keep table inside the card padding so colored background is continuous */
+  padding: 0;
+}
+.bill-group-card .table {
+  margin-bottom: 0;
+  background: transparent;
+  width: 100%;
+  /* use separate borders to avoid collapse artefacts/notches between cells */
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+/* Keep cell content readable and prevent accidental overlap with background accents */
+.bill-group-card .table td {
+  /* generally keep single-line ellipsis for compactness but allow tenant cell to wrap if needed */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: transparent; /* ensure no unexpected cell backgrounds */
+}
+
+/* Make row backgrounds opaque so the group's colored background doesn't show through
+   inside the table rows. This creates a white/striped card look over the colored group. */
+
+/* Make table rows transparent so the group's colored background is visible behind rows */
+.bill-group-card .table tbody td,
+.bill-group-card .table tbody th {
+  background: transparent !important; /* allow the group card background to show through */
+}
+
+/* subtle row separators and comfortable padding */
+.bill-group-card .table tbody tr td {
+  border-bottom: 1px solid rgba(0,0,0,0.04);
+  padding-top: 12px;
+  padding-bottom: 12px;
+  background-clip: padding-box; /* prevent any cell background bleeding past rounded corners */
+}
+
+/* Remove any left notch artifacts from cell borders/padding */
+.bill-group-card .table tbody tr td:first-child {
+  border-left: none;
+  padding-left: 12px; /* align with card padding */
+  padding-right: 10px;
+  width: 56px; /* reserve space for checkbox */
+  background: transparent; /* ensure the checkbox cell doesn't introduce its own background */
+}
+.view-more-btn { float: right; }
+.status-badge { padding: 6px 8px; border-radius: 12px; font-weight:600; }
+.status-badge.pending { background:#6c757d; color:#fff; }
+.status-badge.paid { background:#198754; color:#fff; }
+.status-badge.overdue { background:#dc3545; color:#fff; }
+/* subtle divider between groups */
+.group-divider { height:1px; background: rgba(0,0,0,0.06); margin:12px 0; }
+
+/* Edit icon button used in bill rows */
+.edit-icon {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.edit-icon:hover {
+  background: rgba(0,0,0,0.05);
+}
+.edit-icon:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.edit-icon .visually-hidden {
+  position: absolute !important;
+  height: 1px; width: 1px; overflow: hidden; clip: rect(1px, 1px, 1px, 1px);
+}
+
+/* Ensure action icons in tables have consistent spacing */
+.table .edit-icon { margin-left: 8px; }
+
+/* Ensure rows size to content and do not fix height */
+.bill-group-card .table tbody tr {
+  height: auto;
+}
+
+/* Remove margins/padding from direct children inside table cells that might create extra visual bars */
+.bill-group-card .table td > *,
+.bill-group-card .table th > * {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* Normalize checkbox spacing inside first cell */
+.bill-group-card input[type="checkbox"] { margin: 0 !important; }
+
+/* Ensure checkbox, icon and text align vertically centered */
+.bill-group-card .table td { display: table-cell; vertical-align: middle; }
+
+/* Prevent pseudo-elements on rows or cells from creating extra bars */
+.bill-group-card .table tbody tr::after, .bill-group-card .table tbody tr::before,
+.bill-group-card .table tbody td::after, .bill-group-card .table tbody td::before {
+  content: none !important;
+}

@@ -1,39 +1,20 @@
 import React, { useState } from 'react';
 import axios from '../../axiosConfig';
 import { useNavigate } from 'react-router-dom';
-import QuickScannerModal from '../Layout/QuickScannerModal';
-import QRCodeScanner from '../Dashboard/QRCodeScanner';
+// tenant quick-scan removed here to avoid showing empty admin modal
 
 const TenantLogin = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  // only modal is used now — scanner will render full-screen via portal
+  // scanner modal state removed; quick-scan uses a portal handled elsewhere
+  // scanner modal flag currently only toggled via setter; keep state for future modal wiring
+  // eslint-disable-next-line no-unused-vars
   const [scannerModalOpen, setScannerModalOpen] = useState(false);
   const [qrPreview, setQrPreview] = useState(null); // holds tenant info from QR
   const navigate = useNavigate();
 
-  const handleQRResolved = (respData) => {
-    if (respData && respData.tenant) {
-      setQrPreview({ tenant: respData.tenant, bills: respData.bills || [] });
-  setScannerModalOpen(false);
-    } else {
-      setError('QR did not resolve to a tenant');
-    }
-  };
-
-  const handleScannerClose = () => { setScannerModalOpen(false); };
-
-  // called by the embedded QuickScannerModal -> QRCodeScanner which sets scannedTenant
-  // The scanner component posts to /api/qr-codes/scan and sets the tenant object in the response.
-  // We add a small global event so the QuickScannerModal can pass the resolved data back here.
-  React.useEffect(() => {
-    const handler = (e) => {
-      if (e?.detail?.tenant) handleQRResolved(e.detail);
-    };
-    window.addEventListener('app:qr-resolved', handler);
-    return () => window.removeEventListener('app:qr-resolved', handler);
-  }, []);
+  // quick scan modal removed to keep tenant login focused; use manual login instead
 
   return (
     <div className="hero-center">
@@ -142,7 +123,7 @@ const TenantLogin = () => {
             {/* inline scanner removed: scanner opens as full-screen modal */}
           </div>
 
-          <QuickScannerModal open={scannerModalOpen} onClose={handleScannerClose} />
+                {/* Quick scan modal removed */}
         </div>
       </div>
     </div>

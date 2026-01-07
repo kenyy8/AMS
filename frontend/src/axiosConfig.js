@@ -1,4 +1,7 @@
-﻿import axios from "axios";
+﻿// This file configures Axios for API requests.
+// It sets the base URL and handles authentication redirects.
+
+import axios from "axios";
 
 // Set API base URL from env. For LAN testing set REACT_APP_API_URL in frontend/.env to your laptop IP:
 // REACT_APP_API_URL=http://192.168.100.30:5000

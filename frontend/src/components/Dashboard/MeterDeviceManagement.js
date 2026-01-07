@@ -1,15 +1,14 @@
 ﻿import React, { useEffect, useState } from 'react';
-import './MeterDeviceManagement.css';
+// styles consolidated into App.css
 import { createPortal } from 'react-dom';
-import { useNavigate, NavLink } from 'react-router-dom';
 import axios from '../../axiosConfig';
-import { displayBillType } from '../../utils/billTypes';
+// displayBillType not used in this component
 import { showToast } from '../../toastService';
 import { formatMeterNumber, formatCurrencyPeso } from '../../utils/numberFormat';
 // QR generation removed from Meter device management; QR handled in QRCodeGenerator component
 
 const MeterDeviceManagement = () => {
-  const navigate = useNavigate();
+  // navigation not required in this component
   const [devices, setDevices] = useState([]);
   const [apartments, setApartments] = useState([]);
   const [tenants, setTenants] = useState([]);
@@ -20,33 +19,61 @@ const MeterDeviceManagement = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ device_id: '', meter_type: 'Electricity Meter', type: 'meter', apartment_id: '', previous_reading: '', present_reading: '' });
+  const todayIso = new Date().toISOString().slice(0,10);
+  const [form, setForm] = useState({ apartment_id: '', apartment_floor: '', apartment_number: '', apartment_building: '', meter_type: 'Electricity Meter', type: 'meter', previous_reading: '', present_reading: '', reading_date: todayIso });
   // QR generation state removed
 
   const refresh = async () => {
     try {
-      const [d, a] = await Promise.all([
-  axios.get('/api/meter-devices'),
-        axios.get('/api/apartments')
+      // fetch devices, apartments, and tenants in parallel so we can enrich device rows
+      const [d, a, t] = await Promise.all([
+        axios.get('/api/meter-devices'),
+        axios.get('/api/apartments'),
+        axios.get('/api/tenants')
       ]);
-  // backend may return { devices, pairs } or plain array
-  const payload = d.data && d.data.devices ? d.data.devices : d.data;
-  setDevices(payload);
+      // backend may return { devices, pairs } or plain array
+      const payload = d.data && d.data.devices ? d.data.devices : d.data;
       // persist to localStorage so UI can recover if backend is down
-  try { localStorage.setItem('meterDevices', JSON.stringify(d.data || [])); } catch (e) {}
-      setApartments(a.data);
-      try {
-        const t = await axios.get('/api/tenants');
-        setTenants(t.data);
-      } catch (e) {
-        setTenants([]);
-      }
+      try { localStorage.setItem('meterDevices', JSON.stringify(d.data || [])); } catch (e) {}
+      setApartments(a.data || []);
+      setTenants(t.data || []);
+      // enrich devices with tenant_name and apartment_number where possible
+      const enriched = (payload || []).map(dev => {
+        const aptId = dev.apartment_id || dev.apartmentId || (dev.apartment_id === 0 ? dev.apartment_id : null);
+        const tenant = (t.data || []).find(x => String(x.apartment_id) === String(aptId) || String(x.id) === String(aptId));
+        const apartment = (a.data || []).find(x => String(x.id) === String(aptId));
+        // build a display string Floor | Number | Building when apartment record available
+        const apartmentDisplay = apartment ? `${apartment.floor || ''}${apartment.floor ? ' | ' : ''}${apartment.apartment_number || apartment.number || ''}${(apartment.building || '') ? ' | ' + apartment.building : ''}` : (dev.apartment_number || dev.apartment_number === 0 ? String(dev.apartment_number) : null);
+        return {
+          ...dev,
+          tenant_name: dev.tenant_name || (tenant && tenant.name) || dev.tenant_name || null,
+          apartment_number: apartmentDisplay
+        };
+      });
+      setDevices(enriched);
     } catch (e) {
       console.warn('Failed to fetch devices from API, falling back to localStorage', e);
       try {
-  const raw = localStorage.getItem('meterDevices');
+        const raw = localStorage.getItem('meterDevices');
         const saved = raw ? JSON.parse(raw) : [];
-        setDevices(saved || []);
+        // try to enrich saved devices with known tenants/apartments if available
+        let enrichedSaved = saved || [];
+        try {
+          const t = await axios.get('/api/tenants');
+          const a = await axios.get('/api/apartments');
+          enrichedSaved = (enrichedSaved || []).map(dev => {
+            const aptId = dev.apartment_id || dev.apartmentId || null;
+            const tenant = (t.data || []).find(x => String(x.apartment_id) === String(aptId) || String(x.id) === String(aptId));
+            const apartment = (a.data || []).find(x => String(x.id) === String(aptId));
+            const apartmentDisplay = apartment ? `${apartment.floor || ''}${apartment.floor ? ' | ' : ''}${apartment.apartment_number || apartment.number || ''}${(apartment.building || '') ? ' | ' + apartment.building : ''}` : (dev.apartment_number || '');
+            return {
+              ...dev,
+              tenant_name: dev.tenant_name || (tenant && tenant.name) || null,
+              apartment_number: apartmentDisplay
+            };
+          });
+        } catch (inner) {}
+        setDevices(enrichedSaved || []);
       } catch (pe) {
         setDevices([]);
       }
@@ -146,6 +173,8 @@ const MeterDeviceManagement = () => {
   };
 
   // editable/collapsible rates UI state
+  // eslint-disable-next-line no-unused-vars
+  // eslint-disable-next-line no-unused-vars
   const [editingRates, setEditingRates] = useState(false);
   const [tempElectricity, setTempElectricity] = useState(electricityRate);
   const [tempWater, setTempWater] = useState(waterRate);
@@ -155,7 +184,9 @@ const MeterDeviceManagement = () => {
     setTempWater(waterRate);
   }, [electricityRate, waterRate]);
 
+  // eslint-disable-next-line no-unused-vars
   const startEditRates = () => setEditingRates(true);
+  // eslint-disable-next-line no-unused-vars
   const cancelEditRates = () => { setTempElectricity(electricityRate); setTempWater(waterRate); setEditingRates(false); };
   const confirmSaveRates = async () => {
     const e = Number(tempElectricity || 0);
@@ -173,9 +204,9 @@ const MeterDeviceManagement = () => {
   };
 
   const createDevice = async (e) => {
-    e.preventDefault();
-    setCreating(true);
-    setError('');
+  if (e && e.preventDefault) e.preventDefault();
+  setCreating(true);
+  setError('');
     try {
       // compute usage and total cost
       const prev = Number(form.previous_reading || 0);
@@ -184,14 +215,30 @@ const MeterDeviceManagement = () => {
       // determine rate using the top-level monthly rates
       let r = form.meter_type && form.meter_type.includes('Electric') ? Number(electricityRate || 0) : Number(waterRate || 0);
       const total = parseFloat((usage * r).toFixed(2));
-      // ensure device_id unique in current list; append timestamp if duplicate
-      let deviceId = form.device_id || `dev-${Date.now() % 100000}-${Math.floor(Math.random()*9000)}`;
-      if (devices.find(d => d.device_id === deviceId)) deviceId = `${deviceId}-${Date.now()}`;
-  const payload = { device_id: deviceId, meter_type: form.meter_type, type: form.type, apartment_id: form.apartment_id || null, previous_reading: prev, present_reading: pres, consumption: usage, rate: r, total_cost: total };
-  await axios.post('/api/meter-devices', payload);
-      await refresh();
-      // after successful save to backend, refresh already saved to localStorage
-      setForm({ device_id: '', meter_type: 'Electricity Meter', type: 'meter', apartment_id: '', previous_reading: '', present_reading: '' });
+      // include apartment breakdown fields for display and potential backend storage
+      const payload = {
+        meter_type: form.meter_type,
+        type: form.type,
+        apartment_id: form.apartment_id ? Number(form.apartment_id) : null,
+        apartment_floor: form.apartment_floor || undefined,
+        apartment_number: form.apartment_number || undefined,
+        apartment_building: form.apartment_building || undefined,
+        previous_reading: prev,
+        present_reading: pres,
+        consumption: usage,
+        rate: r,
+        total_cost: total,
+        reading_date: form.reading_date ? new Date(form.reading_date).toISOString() : undefined
+      };
+  // resp intentionally ignored; server response not required to continue
+  // eslint-disable-next-line no-unused-vars
+  const resp = await axios.post('/api/meter-devices', payload);
+  // refresh authoritative server data so tenant/apartment mapping remains correct
+  await refresh();
+  // reset form on success
+  setForm({ apartment_id: '', apartment_floor: '', apartment_number: '', apartment_building: '', meter_type: 'Electricity Meter', type: 'meter', previous_reading: '', present_reading: '', reading_date: todayIso });
+  setCreating(false);
+  return true;
     } catch (err) {
       console.error('Create device error', err.response || err);
       const status = err?.response?.status;
@@ -206,13 +253,14 @@ const MeterDeviceManagement = () => {
           const localId = `local-${Date.now()}`;
           // try to resolve tenant/apartment info for display
           const tenant = tenants.find(t => String(t.apartment_id) === String(form.apartment_id) || String(t.id) === String(form.apartment_id));
+          const aptRec = apartments.find(a => String(a.id) === String(form.apartment_id));
+          const aptDisplay = aptRec ? `${aptRec.floor || ''}${aptRec.floor ? ' | ' : ''}${aptRec.apartment_number || aptRec.number || ''}${(aptRec.building || '') ? ' | ' + aptRec.building : ''}` : `${form.apartment_floor ? form.apartment_floor + ' | ' : ''}${form.apartment_number || ''}${form.apartment_building ? ' | ' + form.apartment_building : ''}`;
           const deviceObj = {
             id: localId,
-            device_id: form.device_id || localId,
             meter_type: form.meter_type,
             type: form.type,
             apartment_id: form.apartment_id || null,
-            apartment_number: tenant?.apartment_number || (apartments.find(a => String(a.id) === String(form.apartment_id))?.number) || '',
+            apartment_number: aptDisplay,
             tenant_name: tenant?.name || null,
             previous_reading: prev,
             present_reading: pres,
@@ -227,8 +275,10 @@ const MeterDeviceManagement = () => {
             try { localStorage.setItem('meterDevices', JSON.stringify(next)); } catch (se) {}
             return next;
           });
-          setForm({ device_id: '', meter_type: 'Electricity Meter', type: 'meter', apartment_id: '', previous_reading: '', present_reading: '' });
+          setForm({ apartment_id: '', apartment_floor: '', apartment_number: '', apartment_building: '', meter_type: 'Electricity Meter', type: 'meter', previous_reading: '', present_reading: '', reading_date: todayIso });
           setError('');
+          setCreating(false);
+          return true;
         } catch (inner) {
           setError(inner.message || 'Create device failed');
         }
@@ -237,12 +287,16 @@ const MeterDeviceManagement = () => {
       }
     }
     setCreating(false);
+    return false;
   };
 
+  // eslint-disable-next-line no-unused-vars
   const updateDevice = async (dev, changes) => {
     setError('');
     try {
-  await axios.put(`/api/meter-devices/${dev.id}`, { ...dev, ...changes });
+  // Only send the changed fields to avoid accidentally overwriting identity/relationship fields
+  await axios.put(`/api/meter-devices/${dev.id}`, changes);
+      // refresh authoritative server data so tenant/apartment mapping remains correct
       await refresh();
     } catch (e) {
       setError(e.response?.data?.message || 'Update device failed');
@@ -306,20 +360,20 @@ const MeterDeviceManagement = () => {
   setModalPrev(strip(pres));
   // present should start empty for the new reading
   setModalPresent('');
-  // try to prefill date from last_updated or now
+  // try to prefill date from last_updated or now (date-only)
   const d = device.last_updated || device.updated_at || device.recorded_at || new Date().toISOString();
-  // make a simple ISO-local datetime for input if possible
-  try { setModalDate(new Date(d).toISOString().slice(0,16)); } catch(e) { setModalDate(new Date().toISOString().slice(0,16)); }
+  try { setModalDate(new Date(d).toISOString().slice(0,10)); } catch(e) { setModalDate(new Date().toISOString().slice(0,10)); }
   setModalValue('');
   setShowModal(true);
   };
 
+  // eslint-disable-next-line no-unused-vars
   const openEditModal = (device) => {
     setModalDevice(device);
     setModalPrev(device.previous_reading ?? '');
     setModalPresent(device.present_reading ?? '');
-    const d = device.last_updated || device.updated_at || device.recorded_at || new Date().toISOString();
-    try { setModalDate(new Date(d).toISOString().slice(0,16)); } catch(e) { setModalDate(new Date().toISOString().slice(0,16)); }
+  const d = device.last_updated || device.updated_at || device.recorded_at || new Date().toISOString();
+  try { setModalDate(new Date(d).toISOString().slice(0,10)); } catch(e) { setModalDate(new Date().toISOString().slice(0,10)); }
     setModalValue(device.present_reading || '');
     setShowEditModal(true);
   };
@@ -334,13 +388,34 @@ const MeterDeviceManagement = () => {
     if (!modalDevice) return;
     const prev = Number(modalPrev || 0);
     const pres = Number(modalPresent || modalValue || 0);
-    if (isNaN(pres)) { setError('Invalid present reading'); return; }
+    if (!Number.isFinite(prev) || !Number.isFinite(pres)) { setError('Invalid readings'); return; }
+    if (pres < prev) { setError('Present reading must be >= previous reading'); return; }
+    // recalc consumption and total using device rate or global rates
+    const consumption = Math.max(0, pres - prev);
+    const rate = modalDevice?.rate ?? (modalDevice?.meter_type && modalDevice.meter_type.toString().toLowerCase().includes('elect') ? Number(electricityRate || 0) : Number(waterRate || 0));
+    const total_cost = Number((consumption * Number(rate || 0)).toFixed(2));
+    // prepare payload matching backend expectations
+    const payload = {
+  previous_reading: Number(prev || 0),
+  present_reading: Number(pres || 0),
+  consumption: Number(consumption || 0),
+  rate: Number(rate || 0),
+  total_cost: Number(total_cost || 0),
+  // convert local datetime-local value to ISO string for backend and include last_updated alias
+  reading_date: modalDate ? new Date(modalDate).toISOString() : undefined,
+  last_updated: modalDate ? new Date(modalDate).toISOString() : undefined
+    };
     try {
-      await axios.put(`/api/meter-devices/${modalDevice.id}`, { ...modalDevice, previous_reading: prev, present_reading: pres, last_updated: modalDate });
-      await refresh();
-      closeEditModal();
+      // send only the fields to update
+      await axios.put(`/api/meter-devices/${modalDevice.id}`, payload);
+  // refresh authoritative server data so tenant/apartment mapping remains correct
+  await refresh();
+  showToast('Reading updated', 'success');
+  closeEditModal();
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to save edits');
+      const msg = err.response?.data?.message || err.message || 'Failed to save edits';
+      setError(msg);
+      showToast(msg, 'error');
     }
   };
 
@@ -365,22 +440,44 @@ const MeterDeviceManagement = () => {
     const value = Number(modalValue);
     if (isNaN(value)) { setError('Invalid reading'); return; }
     try {
-  await axios.put(`/api/meter-devices/update-reading/${modalDevice.id}`, { presentReading: value });
+  // include optional reading date if provided
+  const lastUpdatedIso = modalDate ? new Date(modalDate).toISOString() : undefined;
+  await axios.put(`/api/meter-devices/update-reading/${modalDevice.id}`, { presentReading: value, lastUpdated: lastUpdatedIso });
       await refresh();
-      closeModal();
+  closeModal();
+  showToast('Reading updated', 'success');
     } catch (e) {
-      setError(e.response?.data?.message || 'Failed to update reading');
+  const msg = e.response?.data?.message || 'Failed to update reading';
+  setError(msg);
+  showToast(msg, 'error');
     }
   };
 
   // helpers for grouping/sorting and paused detection
   const isPaused = (d) => {
-    // check common fields for a paused/disabled tenant or device
+    // treat non-active statuses as 'paused' for display purposes
     if (!d) return false;
     const s = (d.status || d.tenant_status || d.tenant?.status || '').toString().toLowerCase();
-    if (s === 'paused' || s === 'inactive' || s === 'disabled') return true;
-    if (d.paused || d.is_paused) return true;
-    return false;
+    if (s === 'active') return false;
+    return true;
+  };
+
+  // Format a date-like value to MM/DD/YYYY
+  const formatDateOnly = (raw) => {
+    if (!raw) return '-';
+    try {
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${mm}/${dd}/${yyyy}`;
+      }
+    } catch (e) {}
+    const s = String(raw).split('T')[0];
+    const parts = s.split('-');
+    if (parts.length === 3) return `${parts[1].padStart(2,'0')}/${parts[2].padStart(2,'0')}/${parts[0]}`;
+    return String(raw);
   };
 
   const filterDevices = (list) => {
@@ -390,7 +487,7 @@ const MeterDeviceManagement = () => {
       const tn = (d.tenant_name || '').toString().toLowerCase();
       const apt = (d.apartment_number || d.unit || d.apartment_id || '').toString().toLowerCase();
       const mt = (d.meter_type || d.type || '').toString().toLowerCase();
-      return tn.includes(q) || apt.includes(q) || mt.includes(q) || (d.device_id||'').toString().toLowerCase().includes(q);
+      return tn.includes(q) || apt.includes(q) || mt.includes(q);
     });
   };
 
@@ -404,10 +501,11 @@ const MeterDeviceManagement = () => {
       else byType.other.push(d);
     }
     const sortFn = (a,b) => {
-      const pa = isPaused(a); const pb = isPaused(b);
-      if (pa !== pb) return pa ? 1 : -1;
-      const an = (a.tenant_name || a.device_id || '').toString().toLowerCase();
-      const bn = (b.tenant_name || b.device_id || '').toString().toLowerCase();
+      const aActive = ((a.status || a.tenant_status || a.tenant?.status) === 'active');
+      const bActive = ((b.status || b.tenant_status || b.tenant?.status) === 'active');
+      if (aActive !== bActive) return aActive ? -1 : 1;
+      const an = (a.tenant_name || a.apartment_number || '').toString().toLowerCase();
+      const bn = (b.tenant_name || b.apartment_number || '').toString().toLowerCase();
       return an.localeCompare(bn);
     };
     byType.electricity.sort(sortFn);
@@ -494,7 +592,7 @@ const MeterDeviceManagement = () => {
                           const rowStyle = paused ? { color: '#6c757d', opacity: 0.7 } : {};
                           return (
                             <tr key={d.id} style={rowStyle}>
-                              <td style={{ textAlign: 'center' }}>{d.tenant_name || d.device_id}</td>
+                              <td style={{ textAlign: 'center' }}>{d.tenant_name || d.apartment_number || '-'}</td>
                               <td style={{ textAlign: 'center' }}>{d.apartment_number || '-'}</td>
                               <td style={{ textAlign: 'center' }}>{d.meter_type || d.type || '-'}</td>
                               <td style={{ textAlign: 'center' }}>{formatMeterNumber(d.previous_reading ?? '')}</td>
@@ -502,15 +600,13 @@ const MeterDeviceManagement = () => {
                               <td style={{ textAlign: 'center' }}>{formatMeterNumber(d.consumption ?? d.usage ?? '')}</td>
                               <td style={{ textAlign: 'center' }}>{d.rate != null ? formatCurrencyPeso(d.rate) : ''}</td>
                               <td style={{ textAlign: 'center' }}>{d.total_cost != null ? formatCurrencyPeso(d.total_cost) : ''}</td>
-                              <td style={{ textAlign: 'center' }}>{d.last_updated ? new Date(d.last_updated).toLocaleString() : '-'}</td>
+                              <td style={{ textAlign: 'center' }}>{d.last_updated ? formatDateOnly(d.last_updated) : '-'}</td>
                               <td style={{ textAlign: 'center' }}>
                                 <div className="d-flex justify-content-center gap-2">
                                   <button type="button" className="btn btn-sm btn-outline-secondary mdm-icon-btn" title="Update Reading" onClick={() => openUpdateModal(d)}>
                                     <span aria-hidden="true">🔄</span>
                                   </button>
-                                  <button type="button" className="btn btn-sm btn-outline-secondary mdm-icon-btn" title="Edit" onClick={() => openEditModal(d)}>
-                                    <span aria-hidden="true">✏️</span>
-                                  </button>
+                                  {/* Edit action removed per UI update requirements */}
                                   <button type="button" className="btn btn-sm btn-outline-danger mdm-icon-btn" title="Delete" onClick={() => deleteDevice(d.id)}>
                                     <span aria-hidden="true">🗑️</span>
                                   </button>
@@ -542,10 +638,10 @@ const MeterDeviceManagement = () => {
           {/* Update Reading Modal (enhanced) */}
           <div style={{ position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: showModal ? 'auto' : 'none' }}>
             <div className={`modal fade ${showModal ? 'show' : ''}`} style={{ display: showModal ? 'block' : 'none', zIndex: 2010 }} tabIndex="-1" role="dialog" aria-hidden={!showModal}>
-              <div className="modal-dialog modal-sm modal-dialog-centered" role="document">
+              <div className="modal-dialog modal-sm modal-dialog-centered" role="document" style={{ transform: 'none' }}>
                 <div className="modal-content" style={{ pointerEvents: 'auto' }}>
                   <div className="modal-header">
-                    <h5 className="modal-title">Update Reading - {modalDevice?.tenant_name || modalDevice?.device_id}</h5>
+                    <h5 className="modal-title">Update Reading - {modalDevice?.tenant_name || modalDevice?.apartment_number}</h5>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeModal}></button>
                   </div>
                   <div className="modal-body">
@@ -559,7 +655,7 @@ const MeterDeviceManagement = () => {
                     </div>
                     <div className="mb-3">
                       <label className="form-label">Reading Date</label>
-                      <input type="datetime-local" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
+                      <input type="date" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
                     </div>
                       <div className="mb-3 d-flex gap-2">
                       <div style={{ flex: 1 }}>
@@ -591,39 +687,47 @@ const MeterDeviceManagement = () => {
           {/* Create Device Modal */}
           <div style={{ position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: showCreateModal ? 'auto' : 'none' }}>
             <div className={`modal fade ${showCreateModal ? 'show' : ''}`} style={{ display: showCreateModal ? 'block' : 'none', zIndex: 2010 }} tabIndex="-1" role="dialog" aria-hidden={!showCreateModal}>
-              <div className="modal-dialog modal-lg modal-dialog-centered" role="document">
+              <div className="modal-dialog modal-lg modal-dialog-centered" role="document" style={{ transform: 'none' }}>
                 <div className="modal-content" style={{ pointerEvents: 'auto' }}>
                   <div className="modal-header">
                     <h5 className="modal-title">Create Device</h5>
                     <button type="button" className="btn-close" aria-label="Close" onClick={() => setShowCreateModal(false)}></button>
                   </div>
                   <div className="modal-body">
-                    <form className="row g-3" onSubmit={(e) => { createDevice(e); setShowCreateModal(false); }}>
+                    <form className="row g-3" onSubmit={async (e) => { e.preventDefault(); const ok = await createDevice(e); if (ok) setShowCreateModal(false); }}>
                       <div className="col-md-12">
                         <label className="form-label">Tenant (select)</label>
-                        <select className="form-select" value={form.apartment_id ? String(form.apartment_id) : ''} onChange={async (e) => {
-                          const tenantId = e.target.value;
-                          if (!tenantId) { setForm({ ...form, apartment_id: '' }); return; }
+                        <select className="form-select" value={form.apartment_id ? String(form.apartment_id) : ''} onChange={(e) => {
+                          const aptVal = e.target.value;
+                          if (!aptVal) { setForm(prev => ({ ...prev, apartment_id: '', apartment_floor: '', apartment_number: '', apartment_building: '' })); return; }
                           try {
-                            const tResp = await axios.get('/api/tenants');
-                            const found = tResp.data.find(t => String(t.id) === String(tenantId));
-                            if (found) {
-                              const safeName = (found.name || '').replace(/\s+/g, '').replace(/[^a-zA-Z0-9]/g, '');
-                              const aptNum = found.apartment_number || found.apartment_id || 'NA';
-                              const genId = `APT${aptNum}_${safeName}`;
-                              setForm(prev => ({ ...prev, apartment_id: found.apartment_id || '', device_id: prev.device_id || genId }));
-                            } else setForm(prev => ({ ...prev, apartment_id: '' }));
-                          } catch (err) {}
+                            // try to find tenant and fill apartment details from apartments list when possible
+                            const selTenant = tenants.find(t => String(t.apartment_id) === String(aptVal) || String(t.id) === String(aptVal));
+                            const aptRec = apartments.find(a => String(a.id) === String(aptVal)) || (selTenant && apartments.find(a => String(a.id) === String(selTenant.apartment_id)));
+                            if (selTenant || aptRec) {
+                              const apt = aptRec || apartments.find(a => String(a.apartment_number) === String(selTenant.apartment_number));
+                              setForm(prev => ({ ...prev, apartment_id: aptVal, apartment_floor: apt?.floor || selTenant?.floor || '', apartment_number: apt?.apartment_number || selTenant?.apartment_number || '', apartment_building: apt?.building || selTenant?.building || '' }));
+                            } else {
+                              setForm(prev => ({ ...prev, apartment_id: aptVal }));
+                            }
+                          } catch (err) {
+                            // ignore
+                          }
                         }}>
                           <option value="">Unassigned</option>
                           {tenants.map(t => (
-                            <option key={t.id} value={t.id}>{t.name} - {t.apartment_number || 'No Apt'}</option>
+                            <option key={t.id} value={t.apartment_id || t.id || ''}>{t.name} - {t.apartment_number || 'No Apt'}</option>
                           ))}
                         </select>
                       </div>
                       <div className="col-md-4">
-                        <label className="form-label">Device ID</label>
-                        <input className="form-control" value={form.device_id} onChange={e => setForm({ ...form, device_id: e.target.value })} required />
+                        <label className="form-label">Apartment</label>
+                        <input className="form-control" value={`${form.apartment_floor ? form.apartment_floor + ' | ' : ''}${form.apartment_number || ''}${form.apartment_building ? ' | ' + form.apartment_building : ''}`} onChange={e => {
+                          // allow manual override by parsing the input into components when possible (split on |)
+                          const v = e.target.value || '';
+                          const parts = v.split('|').map(p => p.trim());
+                          setForm(prev => ({ ...prev, apartment_floor: parts[0] || '', apartment_number: parts[1] || parts[0] || '', apartment_building: parts[2] || '' }));
+                        }} required />
                       </div>
                       <div className="col-md-4">
                         <label className="form-label">Meter Type</label>
@@ -632,7 +736,10 @@ const MeterDeviceManagement = () => {
                           <option>Water Meter</option>
                         </select>
                       </div>
-                      <div className="col-md-4" />
+                      <div className="col-md-4">
+                        <label className="form-label">Reading Date</label>
+                        <input type="date" className="form-control" value={form.reading_date} onChange={e => setForm({ ...form, reading_date: e.target.value })} />
+                      </div>
                       <div className="col-md-3">
                         <label className="form-label">Previous Reading <small className="text-muted">(kWh / m³)</small></label>
                         <input type="number" step="0.001" className="form-control" value={form.previous_reading} onChange={e => setForm({ ...form, previous_reading: e.target.value })} />
@@ -661,10 +768,10 @@ const MeterDeviceManagement = () => {
           {/* Edit Modal (dedicated) */}
           <div style={{ position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: showEditModal ? 'auto' : 'none' }}>
             <div className={`modal fade ${showEditModal ? 'show' : ''}`} style={{ display: showEditModal ? 'block' : 'none', zIndex: 2010 }} tabIndex="-1" role="dialog" aria-hidden={!showEditModal}>
-              <div className="modal-dialog modal-sm modal-dialog-centered" role="document">
+              <div className="modal-dialog modal-sm modal-dialog-centered" role="document" style={{ transform: 'none' }}>
                 <div className="modal-content" style={{ pointerEvents: 'auto' }}>
                   <div className="modal-header">
-                    <h5 className="modal-title">Edit Reading - {modalDevice?.tenant_name || modalDevice?.device_id}</h5>
+                    <h5 className="modal-title">Edit Reading - {modalDevice?.tenant_name || modalDevice?.apartment_number}</h5>
                     <button type="button" className="btn-close" aria-label="Close" onClick={closeEditModal}></button>
                   </div>
                   <div className="modal-body">
@@ -678,7 +785,7 @@ const MeterDeviceManagement = () => {
                     </div>
                     <div className="mb-3">
                       <label className="form-label">Reading Date</label>
-                      <input type="datetime-local" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
+                      <input type="date" className="form-control" value={modalDate} onChange={e => setModalDate(e.target.value)} />
                     </div>
           <div className="mb-3 d-flex gap-2">
                       <div style={{ flex: 1 }}>
@@ -706,7 +813,7 @@ const MeterDeviceManagement = () => {
           {/* Rates Modal */}
           <div style={{ position: 'fixed', inset: 0, zIndex: 2000, pointerEvents: showRatesModal ? 'auto' : 'none' }}>
             <div className={`modal fade ${showRatesModal ? 'show' : ''}`} style={{ display: showRatesModal ? 'block' : 'none', zIndex: 2010 }} tabIndex="-1" role="dialog" aria-hidden={!showRatesModal}>
-              <div className="modal-dialog modal-sm modal-dialog-centered" role="document">
+              <div className="modal-dialog modal-sm modal-dialog-centered" role="document" style={{ transform: 'none' }}>
                 <div className="modal-content" style={{ pointerEvents: 'auto' }}>
                   <div className="modal-header">
                     <h5 className="modal-title">Edit Rates</h5>

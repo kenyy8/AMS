@@ -1,10 +1,23 @@
 const db = require('../config/db');
 
 exports.updateReadingByDeviceId = async (device_id, current_reading, last_reading_date) => {
-  const sql = 'UPDATE `meter_devices` SET `present_reading` = ?, `last_reading_date` = ?, `last_updated` = NOW() WHERE `device_id` = ?';
-  const params = [current_reading, last_reading_date, device_id];
-  const [result] = await db.query(sql, params);
-  return result;
+  // if last_reading_date provided, set it and set last_updated to that timestamp; otherwise use NOW()
+  if (last_reading_date) {
+    const sql = 'UPDATE `meter_devices` SET `present_reading` = ?, `last_reading_date` = ?, `last_updated` = ? WHERE `device_id` = ?';
+    const params = [current_reading, last_reading_date, last_reading_date, device_id];
+    const [result] = await db.query(sql, params);
+    return result;
+  } else {
+    const sql = 'UPDATE `meter_devices` SET `present_reading` = ?, `last_reading_date` = ?, `last_updated` = NOW() WHERE `device_id` = ?';
+    const params = [current_reading, last_reading_date, device_id];
+    const [result] = await db.query(sql, params);
+    return result;
+  }
+};
+
+exports.getDeviceByDeviceId = async (device_id) => {
+  const [rows] = await db.query('SELECT d.*, a.apartment_number, a.floor AS apartment_floor, a.building AS apartment_building, t.name AS tenant_name FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id LEFT JOIN tenants t ON t.apartment_id = a.id WHERE d.device_id = ? LIMIT 1', [device_id]);
+  return rows && rows[0];
 };
 
 /**
@@ -140,7 +153,7 @@ exports.insertMeterHistory = async (history) => {
 /**
  * Update device readings by internal id: move present->previous, set new present, recalc consumption and total_cost
  */
-exports.updateReadingById = async (id, newPresentReading) => {
+exports.updateReadingById = async (id, newPresentReading, clientTimestamp) => {
   try {
     // Validate id
     if (!id) throw new Error('Invalid device id');
@@ -160,9 +173,23 @@ exports.updateReadingById = async (id, newPresentReading) => {
   const consumption = Number((present - previous).toFixed(3));
   const total_cost = Number((consumption * rate).toFixed(2));
 
-  const updateSql = 'UPDATE `meter_devices` SET `previous_reading` = ?, `present_reading` = ?, `consumption` = ?, `total_cost` = ?, `last_updated` = NOW() WHERE `id` = ?';
+  // If client provided a timestamp, attempt to use it for last_updated
+  if (clientTimestamp) {
+    const ts = new Date(clientTimestamp);
+    if (!isNaN(ts.getTime())) {
+      const updateSql = 'UPDATE `meter_devices` SET `previous_reading` = ?, `present_reading` = ?, `consumption` = ?, `total_cost` = ?, `last_updated` = ? WHERE `id` = ?';
+      const params = [previous, present, consumption, total_cost, ts, id];
+      await db.query(updateSql, params);
+    } else {
+      const updateSql = 'UPDATE `meter_devices` SET `previous_reading` = ?, `present_reading` = ?, `consumption` = ?, `total_cost` = ?, `last_updated` = NOW() WHERE `id` = ?';
+      const params = [previous, present, consumption, total_cost, id];
+      await db.query(updateSql, params);
+    }
+  } else {
+    const updateSql = 'UPDATE `meter_devices` SET `previous_reading` = ?, `present_reading` = ?, `consumption` = ?, `total_cost` = ?, `last_updated` = NOW() WHERE `id` = ?';
     const params = [previous, present, consumption, total_cost, id];
     await db.query(updateSql, params);
+  }
 
     // return the updated row
   const [updatedRows] = await db.query('SELECT d.*, a.apartment_number FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id WHERE d.id = ?', [id]);
@@ -258,7 +285,7 @@ exports.deleteMeterHistoryById = async (id) => {
 };
 
 exports.getAllDevices = async () => {
-  const [rows] = await db.query('SELECT d.*, a.apartment_number FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id ORDER BY d.id DESC');
+  const [rows] = await db.query('SELECT d.*, a.apartment_number, a.floor AS apartment_floor, a.building AS apartment_building FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id ORDER BY d.id DESC');
   return rows;
 };
 
@@ -268,17 +295,24 @@ exports.createDevice = async (device) => {
   const params = [device_id, meter_type, type, apartment_id || null, previous_reading || 0, present_reading || 0, consumption || 0, rate || 0, total_cost || 0];
   const [result] = await db.query(sql, params);
   const insertId = result.insertId;
-  const [rows] = await db.query('SELECT d.*, a.apartment_number FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id WHERE d.id = ?', [insertId]);
+  const [rows] = await db.query('SELECT d.*, a.apartment_number, a.floor AS apartment_floor, a.building AS apartment_building FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id WHERE d.id = ?', [insertId]);
   return rows[0];
 };
 
 exports.updateDeviceById = async (id, changes) => {
   const keys = Object.keys(changes || {});
   if (keys.length === 0) return null;
+  // If client provided last_updated, include it; otherwise set last_updated = NOW()
+  const hasLastUpdated = keys.includes('last_updated');
   const sets = keys.map(k => `\`${k}\` = ?`).join(', ');
   const params = keys.map(k => changes[k]);
+  let sql;
+  if (hasLastUpdated) {
+    sql = 'UPDATE `meter_devices` SET ' + sets + ' WHERE `id` = ?';
+  } else {
+    sql = 'UPDATE `meter_devices` SET ' + sets + ', `last_updated` = NOW() WHERE `id` = ?';
+  }
   params.push(id);
-  const sql = 'UPDATE `meter_devices` SET ' + sets + ', `last_updated` = NOW() WHERE `id` = ?';
   const [res] = await db.query(sql, params);
   const [rows] = await db.query('SELECT d.*, a.apartment_number FROM `meter_devices` d LEFT JOIN `apartments` a ON d.apartment_id = a.id WHERE d.id = ?', [id]);
   return rows[0];

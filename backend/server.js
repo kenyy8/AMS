@@ -155,20 +155,8 @@ const ensureMeterColumns = () => {
   return Promise.all(tasks).then(() => {});
 };
 
-// Ensure tenants table has is_paused boolean column (backfill for older schemas)
-const ensureTenantIsPausedColumn = () => new Promise((resolve) => {
-  const checkSql = `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'is_paused'`;
-  db.query(checkSql, (err, rows) => {
-    if (err) return resolve();
-    if (!rows || rows.length === 0) {
-      const alter = "ALTER TABLE `tenants` ADD COLUMN `is_paused` TINYINT(1) DEFAULT 0";
-      db.query(alter, (aErr) => {
-        if (aErr) console.warn('Failed to add tenants.is_paused column:', aErr && aErr.message ? aErr.message : aErr);
-        return resolve();
-      });
-    } else return resolve();
-  });
-});
+// tenants.is_paused column and pause feature removed: keep a no-op placeholder to avoid startup errors
+const ensureTenantIsPausedColumn = () => new Promise((resolve) => { return resolve(); });
 
 // Import meter controller to expose a few newer endpoints directly (compat shim)
 const meterController = require('./controllers/meterDeviceController');
@@ -380,15 +368,15 @@ app.put('/api/tenants/:id', (req, res) => {
           });
         }
 
-        // If status changed to paused/resumed, update bills accordingly (do not delete tenants)
+        // If status changed, normalize deprecated 'paused' value and avoid touching is_paused column
         if (prevStatus !== newStatus) {
           if (newStatus === 'paused') {
-            db.query('UPDATE bills SET status = "paused" WHERE tenant_id = ?', [id], () => {});
-            // mark tenant paused flag and set status
-            db.query('UPDATE tenants SET is_paused = 1, status = "paused" WHERE id = ?', [id], () => {});
+            // Map paused -> inactive to preserve intent without using deprecated paused flag
+            db.query('UPDATE tenants SET status = "inactive" WHERE id = ?', [id], () => {});
           } else if (newStatus === 'active') {
+            // Restore bills previously marked as paused (if any) to pending and set tenant active
             db.query('UPDATE bills SET status = "pending" WHERE tenant_id = ? AND status = "paused"', [id], () => {});
-            db.query('UPDATE tenants SET is_paused = 0, status = "active" WHERE id = ?', [id], () => {});
+            db.query('UPDATE tenants SET status = "active" WHERE id = ?', [id], () => {});
           }
         }
 
@@ -652,14 +640,14 @@ app.patch('/api/bills/:id/status', (req, res) => {
       });
     });
   } else if (status === 'paused') {
-    // simple status change to paused; no paused_until handling
+    // paused state deprecated: map to pending to keep bills actionable
     const sql = 'UPDATE bills SET status = ? WHERE id = ?';
-    db.query(sql, [status, id], (err) => {
+    db.query(sql, ['pending', id], (err) => {
       if (err) {
-        console.error('PATCH /api/bills/:id/status - paused error:', err);
-        return res.status(500).json({ message: 'Failed to pause bill', error: err.message });
+        console.error('PATCH /api/bills/:id/status - paused->pending error:', err);
+        return res.status(500).json({ message: 'Failed to update bill status', error: err.message });
       }
-      return res.json({ message: 'Bill paused' });
+      return res.json({ message: 'Bill status normalized to pending' });
     });
   } else {
     return res.status(400).json({ message: 'Unknown status' });
@@ -714,7 +702,7 @@ app.delete('/api/apartments/:id', (req, res) => {
 // Minimal API: Meter Devices (compatibility for older clients)
 app.get('/api/meter-devices', (req, res) => {
   const sql = `
-    SELECT d.*, a.apartment_number, t.name AS tenant_name
+  SELECT d.*, a.apartment_number, a.floor AS apartment_floor, a.building AS apartment_building, t.name AS tenant_name
   FROM meter_devices d
     LEFT JOIN apartments a ON d.apartment_id = a.id
     LEFT JOIN tenants t ON a.id = t.apartment_id AND t.status = 'active'
@@ -729,36 +717,83 @@ app.get('/api/meter-devices', (req, res) => {
 app.post('/api/tenants/:id/pause', (req, res) => {
   const { id } = req.params;
   const { action } = req.body; // expected 'pause' or 'resume'
-  if (action === 'pause') {
-    // mark tenant as paused (flag + status) and pause bills; keep tenant row intact
-    const q1 = `UPDATE tenants SET is_paused = 1, status = 'paused' WHERE id = ?`;
-    db.query(q1, [id], (tErr) => {
-      if (tErr) return res.status(500).json({ message: 'Failed to mark tenant paused' });
-      const sql = `UPDATE bills SET status = 'paused' WHERE tenant_id = ?`;
-      db.query(sql, [id], (err, result) => {
-        if (err) return res.status(500).json({ message: 'Failed to pause tenant bills' });
-        return res.json({ message: 'Tenant paused', affected: result.affectedRows });
-      });
-    });
-  } else if (action === 'resume') {
-    // clear paused flag and restore tenant status to active, resume paused bills
-    const q2 = `UPDATE tenants SET is_paused = 0, status = 'active' WHERE id = ?`;
-    db.query(q2, [id], (tErr) => {
-      if (tErr) return res.status(500).json({ message: 'Failed to unmark tenant paused' });
-      const sql = `UPDATE bills SET status = 'pending' WHERE tenant_id = ? AND status = 'paused'`;
-      db.query(sql, [id], (err, result) => {
-        if (err) return res.status(500).json({ message: 'Failed to resume tenant bills' });
-        return res.json({ message: 'Tenant resumed', affected: result.affectedRows });
-      });
-    });
-  } else {
-    return res.status(400).json({ message: 'Invalid action' });
+  // Pause/resume feature removed. Return success without mutating database to preserve compatibility.
+  if (action === 'pause' || action === 'resume') {
+    return res.json({ message: `Pause/resume endpoint deprecated; no action taken for tenant ${id}` });
   }
+  return res.status(400).json({ message: 'Invalid action' });
 });
 
-app.post('/api/meter-devices', (req, res) => {
-  const { device_id, meter_type, type, apartment_id, previous_reading, present_reading, rate } = req.body;
-  if (!device_id) return res.status(400).json({ message: 'device_id is required' });
+app.post('/api/meter-devices', async (req, res) => {
+  // Accept either device_id or apartment-based payload. Log payload for easier debugging.
+  const payload = req.body || {};
+  console.info('[meter-devices] create payload ->', payload);
+  let { device_id, meter_type, type, apartment_id, previous_reading, present_reading, rate, apartment_floor, apartment_number, apartment_building, reading_date } = payload;
+
+  // generate a stable device_id when not provided, prefer apartment number/building
+  if (!device_id) {
+    try {
+      const aptPart = apartment_number ? String(apartment_number) : (apartment_id ? String(apartment_id) : null);
+      const bld = apartment_building ? `_${String(apartment_building)}` : '';
+      // base id shown to users (Floor | Number | Building) should not include the hidden counter
+      const baseId = aptPart ? `apt:${aptPart}${bld}` : `apt:${Date.now()}`;
+
+      // Determine apartment matcher: prefer apartment_id if provided, otherwise try to match by apartment_number
+      const aptMatchSql = apartment_id ? 'SELECT id FROM apartments WHERE id = ?' : 'SELECT id FROM apartments WHERE apartment_number = ? LIMIT 1';
+      const aptMatchParam = apartment_id ? apartment_id : apartment_number;
+
+      // Count existing devices for this apartment (if we can resolve apartment_id)
+      let resolvedAptId = null;
+      try {
+        if (aptMatchParam) {
+          const [aRows] = await new Promise((resolve) => db.query(aptMatchSql, [aptMatchParam], (err, rows) => resolve([rows, err])));
+          if (aRows && aRows.length > 0 && aRows[0].id) resolvedAptId = aRows[0].id;
+        }
+      } catch (e) {
+        // ignore resolution failures; fall back to baseId uniqueness check below
+      }
+
+      if (resolvedAptId) {
+        // Count devices for this apartment
+        const countSql = 'SELECT COUNT(*) AS cnt FROM meter_devices WHERE apartment_id = ?';
+        try {
+          const [cntRows] = await new Promise((resolve) => db.query(countSql, [resolvedAptId], (err, rows) => resolve([rows, err])));
+          const cnt = (cntRows && cntRows[0] && cntRows[0].cnt) || 0;
+          if (cnt >= 2) {
+            return res.status(400).json({ message: 'Maximum of 2 devices allowed per apartment' });
+          }
+          // choose suffix 1 or 2 depending on existing devices
+          const suffix = cnt === 0 ? '_1' : '_2';
+          device_id = baseId + suffix;
+        } catch (e) {
+          // fallback to baseId without suffix if counting fails
+          device_id = baseId + '_1';
+        }
+      } else {
+        // apartment not resolved; ensure uniqueness by trying suffixes
+        // attempt baseId_1, then baseId_2, otherwise fallback to timestamp id
+        const trySql = 'SELECT COUNT(*) AS cnt FROM meter_devices WHERE device_id = ?';
+        try {
+          const [r1] = await new Promise((resolve) => db.query(trySql, [baseId + '_1'], (err, rows) => resolve([rows, err])));
+          if (r1 && r1[0] && r1[0].cnt === 0) {
+            device_id = baseId + '_1';
+          } else {
+            const [r2] = await new Promise((resolve) => db.query(trySql, [baseId + '_2'], (err, rows) => resolve([rows, err])));
+            if (r2 && r2[0] && r2[0].cnt === 0) {
+              device_id = baseId + '_2';
+            } else {
+              // both taken, return error to avoid exceeding 2 per apartment pattern
+              return res.status(400).json({ message: 'Maximum of 2 devices allowed per apartment' });
+            }
+          }
+        } catch (e) {
+          device_id = baseId + '_1';
+        }
+      }
+    } catch (e) {
+      device_id = `apt:${Date.now()}_1`;
+    }
+  }
 
   const prev = Number(previous_reading || 0);
   const pres = Number(present_reading || 0);
@@ -766,14 +801,41 @@ app.post('/api/meter-devices', (req, res) => {
   const r = Number(rate || 0);
   const total = parseFloat((usage * r).toFixed(2));
 
-  const sql = 'INSERT INTO `meter_devices` (`device_id`, `meter_type`, `type`, `apartment_id`, `previous_reading`, `present_reading`, `consumption`, `rate`, `total_cost`, `current_reading`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-  db.query(sql, [device_id, meter_type || null, type || null, apartment_id || null, prev, pres, usage, r, total, pres], (err, result) => {
+  // If client provided a reading_date, use it to set last_updated (date-only/ISO string)
+  let lastUpdatedSqlExpr = 'NOW()';
+  let lastUpdatedParam = null;
+  if (reading_date) {
+    try {
+      const dt = new Date(reading_date);
+      if (!isNaN(dt.getTime())) {
+        lastUpdatedSqlExpr = '?';
+        lastUpdatedParam = dt;
+      }
+    } catch (e) {}
+  }
+
+  const sql = `INSERT INTO \`meter_devices\` (\`device_id\`, \`meter_type\`, \`type\`, \`apartment_id\`, \`previous_reading\`, \`present_reading\`, \`consumption\`, \`rate\`, \`total_cost\`, \`current_reading\`, \`last_updated\`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${lastUpdatedSqlExpr})`;
+  const params = [device_id, meter_type || null, type || null, apartment_id || null, prev, pres, usage, r, total, pres];
+  if (lastUpdatedParam) params.push(lastUpdatedParam);
+
+  db.query(sql, params, (err, result) => {
     if (err) {
-  console.error('Meter create error:', err);
+      console.error('Meter create error:', err && err.message ? err.message : err);
       if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'device_id already exists' });
+      // return detailed message for 400-ish client problems (e.g., invalid input)
       return res.status(500).json({ message: 'Failed to create device', error: err.message });
     }
-    res.status(201).json({ id: result.insertId });
+
+    // return the inserted row (joined with apartment) for client convenience
+    const insertedId = result.insertId;
+    const sel = `SELECT d.*, a.apartment_number, a.floor AS apartment_floor, a.building AS apartment_building, t.name AS tenant_name FROM meter_devices d LEFT JOIN apartments a ON d.apartment_id = a.id LEFT JOIN tenants t ON a.id = t.apartment_id AND t.status = 'active' WHERE d.id = ?`;
+    db.query(sel, [insertedId], (sErr, rows) => {
+      if (sErr) {
+        console.error('Failed to fetch inserted device:', sErr && sErr.message ? sErr.message : sErr);
+        return res.status(201).json({ id: insertedId });
+      }
+      return res.status(201).json(rows && rows[0] ? rows[0] : { id: insertedId });
+    });
   });
 });
 
@@ -1083,9 +1145,9 @@ app.get('/api/reports/bills', (req, res) => {
       ph.amount_paid AS amount,
       'paid' AS status,
       ph.paid_at AS due_date,
-      t.name AS tenant_name,
-      t.is_paused AS tenant_is_paused,
-      t.status AS tenant_status
+  t.name AS tenant_name,
+  NULL AS tenant_is_paused,
+  t.status AS tenant_status
     FROM payment_history ph
     JOIN bills b ON ph.bill_id = b.id
     LEFT JOIN tenants t ON b.tenant_id = t.id
@@ -1102,9 +1164,9 @@ app.get('/api/reports/bills', (req, res) => {
       b.amount AS amount,
       b.status AS status,
       b.due_date AS due_date,
-      t.name AS tenant_name,
-      t.is_paused AS tenant_is_paused,
-      t.status AS tenant_status
+  t.name AS tenant_name,
+  NULL AS tenant_is_paused,
+  t.status AS tenant_status
     FROM bills b
     LEFT JOIN tenants t ON b.tenant_id = t.id
     -- Match Bill Management: treat pending bills as those with status != 'paid'
@@ -1143,14 +1205,15 @@ app.get('/api/reports/overview', (req, res) => {
     SELECT
       IFNULL((SELECT SUM(ph.amount_paid) FROM payment_history ph JOIN bills b2 ON ph.bill_id = b2.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? AND ph.payment_type = 'RENT' ${tenantId ? 'AND b2.tenant_id = ?' : ''}),0) AS rent_collected,
       IFNULL((SELECT SUM(ph.amount_paid) FROM payment_history ph JOIN bills b2 ON ph.bill_id = b2.id WHERE DATE(ph.paid_at) BETWEEN ? AND ? AND ph.payment_type = 'UTILITY' ${tenantId ? 'AND b2.tenant_id = ?' : ''}),0) AS utility_collected,
-      IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND b.due_date < NOW() AND LOWER(b.bill_type) LIKE '%rent%' ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS rent_due,
-      IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND b.due_date < NOW() AND (LOWER(b.bill_type) LIKE '%water%' OR LOWER(b.bill_type) LIKE '%elect%' OR LOWER(b.bill_type) LIKE '%electric%') ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS utility_due
+  -- rent_due / utility_due: apply the requested inclusive date range filter on bill due_date
+  IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND DATE(b.due_date) BETWEEN ? AND ? AND LOWER(b.bill_type) LIKE '%rent%' ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS rent_due,
+  IFNULL((SELECT SUM(b.amount) FROM bills b WHERE (b.status IS NULL OR b.status <> 'paid') AND DATE(b.due_date) BETWEEN ? AND ? AND (LOWER(b.bill_type) LIKE '%water%' OR LOWER(b.bill_type) LIKE '%elect%' OR LOWER(b.bill_type) LIKE '%electric%') ${tenantId ? 'AND b.tenant_id = ?' : ''}),0) AS utility_due
   `;
 
   // 2) Occupancy rate: tenants with active contracts / total rooms (apartments)
   const occupancySql = `
     SELECT
-      (SELECT COUNT(*) FROM tenants WHERE status = 'active') AS active_tenants,
+      (SELECT COUNT(*) FROM tenants WHERE status = 'active' AND (move_in_date IS NULL OR DATE(move_in_date) <= ?)) AS active_tenants,
       (SELECT COUNT(*) FROM apartments) AS total_rooms
   `;
 
@@ -1244,20 +1307,24 @@ app.get('/api/reports/overview', (req, res) => {
   // build params for the summarySql in the correct order
   const summaryParams = [];
   // rent_collected params
+  // rent_collected params (sd,ed[,tenant])
   summaryParams.push(sd, ed);
   if (tenantId) summaryParams.push(tenantId);
-  // utility_collected params
+  // utility_collected params (sd,ed[,tenant])
   summaryParams.push(sd, ed);
   if (tenantId) summaryParams.push(tenantId);
-  // rent_due params (only tenantId if present)
+  // rent_due params (sd,ed[,tenant])
+  summaryParams.push(sd, ed);
   if (tenantId) summaryParams.push(tenantId);
-  // utility_due params (only tenantId if present)
+  // utility_due params (sd,ed[,tenant])
+  summaryParams.push(sd, ed);
   if (tenantId) summaryParams.push(tenantId);
 
   const summaryRows = await p(summarySql, summaryParams);
   // temporary debug log to verify correct due/collected totals
   console.log('REPORTS OVERVIEW - summaryRows:', summaryRows && summaryRows[0] ? summaryRows[0] : summaryRows);
-      const occupancyRows = await p(occupancySql, []);
+  // occupancy: compute active tenants as of the end date (tenants with move_in_date <= endDate)
+  const occupancyRows = await p(occupancySql, [ed]);
       const lateRows = tenantId ? await p(lateSql, [sd, ed, tenantId]) : await p(lateSql, [sd, ed]);
       const monthlyRows = tenantId ? await p(monthlySql, [sd, ed, tenantId]) : await p(monthlySql, [sd, ed]);
       const statusRows = tenantId ? await p(statusSql, [sd, ed, tenantId, sd, ed, tenantId]) : await p(statusSql, [sd, ed, sd, ed]);

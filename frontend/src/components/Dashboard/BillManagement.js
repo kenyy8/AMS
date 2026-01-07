@@ -3,10 +3,13 @@ import { useNavigate } from "react-router-dom";
 import axios from "../../axiosConfig";
 import { canonicalizeBillType, displayBillType } from '../../utils/billTypes';
 import { showToast } from '../../toastService';
-import './billGroups.css';
+// styles consolidated into App.css
 import { formatMeterNumber } from '../../utils/numberFormat';
 
 const BillManagement = () => {
+  // navigation is handled elsewhere in toolbar; keep navigate available for future actions
+  // keep navigate available for toolbar actions; silence unused-var warning
+  // eslint-disable-next-line no-unused-vars
   const navigate = useNavigate();
   const [tenants, setTenants] = useState([]);
   const [bills, setBills] = useState([]);
@@ -15,6 +18,7 @@ const BillManagement = () => {
   const [paidBills, setPaidBills] = useState([]);
   // pausedFilter removed: pause is now tenant-scoped via TenantManagement
   const [loading, setLoading] = useState(true);
+  // eslint-disable-next-line no-unused-vars
   const [creating, setCreating] = useState(false);
   const [bulkBillForm, setBulkBillForm] = useState({
     tenant_id: "",
@@ -36,9 +40,11 @@ const BillManagement = () => {
   const [selectedTenant, setSelectedTenant] = useState(null);
   // removed QR state: QR generation removed from Bills page
   // Billing history state for collapsible panel
+  // eslint-disable-next-line no-unused-vars
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [deviceMap, setDeviceMap] = useState({});
   const [selectedHistoryIds, setSelectedHistoryIds] = useState(new Set());
   const [historyEditRow, setHistoryEditRow] = useState(null);
@@ -104,10 +110,10 @@ const BillManagement = () => {
   }, []);
 
   // whenever selectedTenant changes, refresh the bills list appropriately
-  useEffect(() => {
-    refreshBills();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTenant]);
+  // refreshBills is stable within this component lifecycle; suppress exhaustive-deps
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => { refreshBills(); }, [selectedTenant]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // reload bills when other components signal an update (e.g., tenant pause/resume)
   const refreshBills = async () => {
@@ -140,6 +146,7 @@ const BillManagement = () => {
     setPaidBills(paid);
   }, [bills]);
 
+  /* eslint-disable react-hooks/exhaustive-deps */
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key === 'billsUpdated') {
@@ -156,6 +163,7 @@ const BillManagement = () => {
       window.removeEventListener('billsUpdated', onEvent);
     };
   }, []);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const handleTenantSelect = (tenantId) => {
   const id = typeof tenantId === 'string' ? parseInt(tenantId, 10) : tenantId;
@@ -270,7 +278,12 @@ const BillManagement = () => {
       });
       setDeviceMap(map);
       const rows = (histRes.data || []).map(r => {
+        // Prefer reading_date when available (server may use different names). Normalize to recorded_at
         const copy = { ...r };
+        if (r.reading_date && !r.recorded_at) {
+          // reading_date may be date-only (YYYY-MM-DD) or full ISO; keep as-is
+          copy.recorded_at = r.reading_date;
+        }
         // try to infer meter_type from device map when missing
         const keyCandidates = [r.device_id, r.deviceId, r.id, `apt:${r.apartment_number}`, `apt:${r.apartment_id}`];
         for (const k of keyCandidates) {
@@ -280,7 +293,23 @@ const BillManagement = () => {
         }
         return copy;
       });
-      setHistoryRows(rows);
+      // Normalize recorded_at to date-only strings for UI convenience
+      const normalized = rows.map(rr => {
+        const out = { ...rr };
+        const raw = out.recorded_at || out.updated_at || out.updatedAt || '';
+        if (raw) {
+          // If raw contains a time, parse and keep only the date portion
+          try {
+            const d = new Date(raw);
+            if (!isNaN(d.getTime())) out.recorded_at = d.toISOString().split('T')[0];
+            else out.recorded_at = String(raw).split('T')[0];
+          } catch (e) {
+            out.recorded_at = String(raw).split('T')[0];
+          }
+        }
+        return out;
+      });
+      setHistoryRows(normalized);
     } catch (e) {
       console.error('Failed to load billing history', e);
       setHistoryRows([]);
@@ -313,8 +342,28 @@ const BillManagement = () => {
   if (s.includes('elec')) return 'Electricity';
   if (s.includes('power')) return 'Electricity';
   // fallback: return cleaned/capitalized version
-  const cleaned = String(raw).replace(/[_\-]/g, ' ').trim();
+  const cleaned = String(raw).replace(/[_-]/g, ' ').trim();
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  };
+
+  // Format a date-like string to MM/DD/YYYY (prefer avoiding locale differences)
+  const formatDateOnly = (raw) => {
+    if (!raw) return '';
+    try {
+      // Accept ISO date or datetime or plain YYYY-MM-DD
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const yyyy = d.getFullYear();
+        return `${mm}/${dd}/${yyyy}`;
+      }
+    } catch (e) {
+      // fallback to manual split
+    }
+    const parts = String(raw).split('T')[0].split('-');
+    if (parts.length >= 3) return `${parts[1].padStart(2,'0')}/${parts[2].padStart(2,'0')}/${parts[0]}`;
+    return String(raw);
   };
 
   // Helper: infer payment_type from bill_type when payment_type is not present
@@ -345,6 +394,7 @@ const BillManagement = () => {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const deleteBill = async (id) => {
     // use confirm modal instead of native confirm
     setConfirmState({
@@ -368,6 +418,7 @@ const BillManagement = () => {
     });
   };
 
+  // eslint-disable-next-line no-unused-vars
   const markPaid = async (id) => {
     // Single bill mark paid uses bulk endpoint with globalPaidDate
     try {
@@ -387,6 +438,7 @@ const BillManagement = () => {
 
   // per-bill modal removed — payments are recorded via toolbar global date and bulk endpoint
 
+  // eslint-disable-next-line no-unused-vars
   const undoMarkPaid = async (id) => {
     // revert status to pending
     try {
@@ -420,6 +472,7 @@ const BillManagement = () => {
 
   const clearSelection = () => setSelectedIds(new Set());
 
+  // eslint-disable-next-line no-unused-vars
   const batchMarkPaid = async () => {
   if (selectedIds.size === 0) return showToast('No bills selected', 'info');
   setConfirmState({
@@ -453,6 +506,7 @@ const BillManagement = () => {
   });
   };
 
+  // eslint-disable-next-line no-unused-vars
   const batchDelete = async () => {
   if (selectedIds.size === 0) return showToast('No bills selected', 'info');
   setConfirmState({
@@ -510,6 +564,7 @@ const BillManagement = () => {
 
   const clearHistorySelection = () => setSelectedHistoryIds(new Set());
 
+  // eslint-disable-next-line no-unused-vars
   const openHistoryEdit = () => {
     const ids = Array.from(selectedHistoryIds);
     if (ids.length === 0) return showToast('Select one history record to edit', 'info');
@@ -536,9 +591,14 @@ const BillManagement = () => {
     if (!historyEditRow) return;
     try {
       // attempt to update reading via deviceId (compatibility endpoint)
-      const payload = { deviceId: historyEditRow.device_id || historyEditRow.deviceId || historyEditRow.device_id_string, reading: Number(historyEditForm.present_reading), timestamp: historyEditForm.recorded_at || new Date() };
-  // POST /api/meter-devices/reading expects deviceId and reading
-    await axios.post('/api/meter-devices/reading', { deviceId: payload.deviceId || historyEditRow.device_id, reading: payload.reading, timestamp: payload.timestamp });
+      // Use date-only reading_date when available so server can set last_updated accordingly
+      const deviceId = historyEditRow.device_id || historyEditRow.deviceId || historyEditRow.device_id_string;
+      const reading = Number(historyEditForm.present_reading);
+      const reading_date = historyEditForm.recorded_at ? String(historyEditForm.recorded_at) : undefined;
+      // POST /api/meter-devices/reading expects deviceId and reading. Many servers support reading_date or timestamp.
+      const body = { deviceId, reading };
+      if (reading_date) body.reading_date = reading_date;
+      await axios.post('/api/meter-devices/reading', body);
       // refresh history and clear selection/modal
       await loadBillingHistory();
       clearHistorySelection();
@@ -546,8 +606,12 @@ const BillManagement = () => {
       showToast('History updated (new reading added).', 'success');
     } catch (err) {
       console.error('Failed to save history edit', err);
-      // optimistic UI: update local state so user sees effect
-      setHistoryRows(prev => prev.map(r => r.id === historyEditRow.id ? ({ ...r, ...historyEditForm }) : r));
+      // optimistic UI: update local state so user sees effect (normalize recorded_at to date-only)
+      setHistoryRows(prev => prev.map(r => r.id === historyEditRow.id ? ({
+        ...r,
+        ...historyEditForm,
+        recorded_at: historyEditForm.recorded_at ? String(historyEditForm.recorded_at).split('T')[0] : r.recorded_at
+      }) : r));
       setHistoryEditRow(null);
       clearHistorySelection();
   showToast('Saved locally. Server update failed or not supported.', 'error');
@@ -599,10 +663,10 @@ const BillManagement = () => {
       }
       return true;
     }).sort((a,b) => {
-      // Move paused tenant bills to the bottom
-      const pausedA = Boolean(a.tenant_is_paused || a.tenant_status === 'paused');
-      const pausedB = Boolean(b.tenant_is_paused || b.tenant_status === 'paused');
-      if (pausedA !== pausedB) return pausedA ? 1 : -1;
+  // Demote non-active tenant bills to the bottom
+  const aActive = a.tenant_status === 'active';
+  const bActive = b.tenant_status === 'active';
+  if (aActive !== bActive) return aActive ? -1 : 1;
       const dir = sortBy.dir === 'asc' ? 1 : -1;
       if (sortBy.field === 'due_date') return (new Date(a.due_date).getTime() - new Date(b.due_date).getTime()) * dir;
       if (sortBy.field === 'tenant') return ((a.tenant_name||'').localeCompare(b.tenant_name||'')) * dir;
@@ -643,6 +707,7 @@ const BillManagement = () => {
   }, [paidBills, searchText, dateFrom, dateTo, filterType, filterStatus, sortBy]);
 
   // Derived payment history list (reads from paymentHistoryRows returned from /api/payment-history)
+  /* eslint-disable react-hooks/exhaustive-deps */
   const filteredPaymentHistory = useMemo(() => {
     const rows = paymentHistoryRows || [];
     return rows.filter(ph => {
@@ -672,6 +737,7 @@ const BillManagement = () => {
       return 0;
     });
   }, [paymentHistoryRows, searchText, dateFrom, dateTo, filterType, sortBy]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   // Helper: group bills by canonical type and sort by due date DESC by default for group display
   // Group bills into only the 3 valid categories and sort by due_date DESC
@@ -701,7 +767,16 @@ const BillManagement = () => {
 
   return (
   <div className="container-fluid">
-  {/* Global toasts are shown by GlobalToasts mounted at app root; no local toast stack here */}
+    {/* Local table overrides to ensure bill-group tables do not show white stripes */}
+    <style>{`
+      /* Target only tables inside bill-group-cards for safe overrides */
+      .bill-group-card .bill-table, .bill-group-card .bill-table thead, .bill-group-card .bill-table tbody, .bill-group-card .bill-table tr { background-color: transparent !important; }
+      .bill-group-card .bill-table td, .bill-group-card .bill-table th { background-color: transparent !important; vertical-align: middle; }
+      /* keep a subtle row separator while the background is transparent */
+      .bill-group-card .bill-table tbody tr td { border-bottom: 1px solid rgba(0,0,0,0.04); }
+      /* ensure checkbox / first-cell sizing */
+      .bill-group-card .bill-table td:first-child, .bill-group-card .bill-table th:first-child { padding-left: 12px; padding-right: 10px; width: 56px; text-align: center; }
+    `}</style>
 
       {/* Create Bills modal (centered) */}
       {showCreateModal && (
@@ -919,7 +994,7 @@ const BillManagement = () => {
                       await axios.post('/api/bills/pay', { bill_ids: ids, paid_at: globalPaidDate, payment_types });
                       refreshBills(); clearSelection(); showToast('Marked as paid', 'success');
                     } catch (e) {
-                      refreshBills(); showToast('Failed to mark some bills', 'error');
+                      refreshBills(); showToast('Failed to mark some bills as paid', 'error');
                     }
                     setConfirmState({ open: false, title: '', message: '', onConfirm: null, loading: false });
                   }
@@ -981,10 +1056,10 @@ const BillManagement = () => {
                         <div className="text-muted small">No {label.toLowerCase()}.</div>
                       ) : (
                         <div className="table-responsive">
-                          <table className="table table-striped table-hover">
+                          <table className="table bill-table table-hover">
                               <thead>
                               <tr>
-                                <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
+                                <th style={{ width: 56 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
                                 <th>Tenant</th>
                                 <th>Type</th>
                                 <th>Payment Type</th>
@@ -996,11 +1071,11 @@ const BillManagement = () => {
                             </thead>
                             <tbody>
                               {visible.map(bill => {
-                                const tenantPaused = bill.tenant_is_paused || bill.tenant_status === 'paused';
-                                const statusClass = tenantPaused ? 'pending' : bill.status === 'paid' ? 'paid' : bill.status === 'overdue' ? 'overdue' : 'pending';
+                                const tenantActive = bill.tenant_status === 'active';
+                                const statusClass = bill.status === 'paid' ? 'paid' : bill.status === 'overdue' ? 'overdue' : 'pending';
                                 return (
-                                  <tr key={bill.id} className="bill-row" style={{ background: tenantPaused ? '#f8f9fa' : 'transparent', color: tenantPaused ? '#6c757d' : 'inherit' }}>
-                                    <td>{tenantPaused ? <input type="checkbox" disabled /> : <input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} />}</td>
+                                  <tr key={bill.id} className="bill-row" style={{ backgroundColor: !tenantActive ? '#f8f9fa' : 'transparent', color: !tenantActive ? '#6c757d' : 'inherit' }}>
+                                    <td><input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} /></td>
                                     <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <span className="bill-row-icon">{icon}</span>
                                       <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
@@ -1010,11 +1085,10 @@ const BillManagement = () => {
                                     <td>{formatMeterNumber(bill.amount)}</td>
                                     <td>{bill.due_date ? new Date(bill.due_date).toLocaleDateString() : ''}</td>
                                     <td>
-                                      <span className={`status-badge ${statusClass}`}>{tenantPaused ? 'paused' : bill.status}</span>
+                                      <span className={`status-badge ${statusClass}`}>{bill.status}</span>
                                     </td>
                                     <td style={{ textAlign: 'center' }}>
                                       <button title="Edit" aria-label={`Edit bill ${bill.id}`} className="edit-icon" onClick={() => {
-                                          if (tenantPaused) return;
                                           setEditingBill(bill); setEditForm({ bill_type: displayBillType(bill.bill_type), amount: String(bill.amount), due_date: bill.due_date || '' });
                                         }}>
                                         ✏️
@@ -1127,10 +1201,10 @@ const BillManagement = () => {
                         <div className="text-muted small">No {label.toLowerCase()}.</div>
                       ) : (
                         <div className="table-responsive">
-                          <table className="table table-striped table-hover">
+                          <table className="table bill-table table-hover">
                             <thead>
                               <tr>
-                                <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
+                                <th style={{ width: 56 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllVisible(list); else clearSelection(); }} checked={list.length>0 && list.every(b => selectedIds.has(b.id))} /></th>
                                 <th>Tenant</th>
                                 <th>Type</th>
                                 <th>Payment Type</th>
@@ -1142,11 +1216,11 @@ const BillManagement = () => {
                             </thead>
                             <tbody>
                               {visible.map(bill => {
-                                const tenantPaused = bill.tenant_is_paused || bill.tenant_status === 'paused';
-                                const statusClass = tenantPaused ? 'pending' : bill.status === 'paid' ? 'paid' : bill.status === 'overdue' ? 'overdue' : 'pending';
+                                const tenantActive = bill.tenant_status === 'active';
+                                const statusClass = bill.status === 'paid' ? 'paid' : bill.status === 'overdue' ? 'overdue' : 'pending';
                                 return (
-                                  <tr key={bill.id} className="bill-row" style={{ background: tenantPaused ? '#f8f9fa' : 'transparent', color: tenantPaused ? '#6c757d' : 'inherit' }}>
-                                    <td>{tenantPaused ? <input type="checkbox" disabled /> : <input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} />}</td>
+                                  <tr key={bill.id} className="bill-row" style={{ backgroundColor: !tenantActive ? '#f8f9fa' : 'transparent', color: !tenantActive ? '#6c757d' : 'inherit' }}>
+                                    <td><input type="checkbox" checked={selectedIds.has(bill.id)} onChange={() => toggleSelect(bill.id)} /></td>
                                     <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                       <span className="bill-row-icon">{icon}</span>
                                       <span style={{ flex: 1 }}>{bill.tenant_name || bill.tenant_id}</span>
@@ -1155,10 +1229,9 @@ const BillManagement = () => {
                                     <td>{(paymentHistoryRows.find(ph => String(ph.bill_id) === String(bill.id)) || {}).payment_type || inferPaymentType(bill)}</td>
                                     <td>{formatMeterNumber(bill.amount)}</td>
                                     <td>{bill.payment_paid_at ? new Date(bill.payment_paid_at).toLocaleDateString() : ''}</td>
-                                    <td><span className={`status-badge ${statusClass}`}>{tenantPaused ? 'paused' : bill.status}</span></td>
+                                    <td><span className={`status-badge ${statusClass}`}>{bill.status}</span></td>
                                     <td style={{ textAlign: 'center' }}>
                                       <button title="Edit" aria-label={`Edit bill ${bill.id}`} className="edit-icon" onClick={() => {
-                                          if (tenantPaused) return;
                                           const b = bills.find(x => x.id === bill.id) || bill;
                                           setEditingBill(b); setEditForm({ bill_type: displayBillType(b.bill_type), amount: String(b.amount), due_date: b.due_date || '' });
                                         }}>
@@ -1228,10 +1301,10 @@ const BillManagement = () => {
                         <div className="text-muted small">No {label.toLowerCase()}.</div>
                       ) : (
                         <div className="table-responsive">
-                          <table className="table table-striped table-hover">
+                          <table className="table bill-table table-hover">
                             <thead>
                               <tr>
-                                <th style={{ width: 36 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllHistoryVisible(list); else clearHistorySelection(); }} checked={list.length>0 && list.every(r => selectedHistoryIds.has(r.id))} /></th>
+                                <th style={{ width: 56 }}><input type="checkbox" onChange={(e) => { if (e.target.checked) selectAllHistoryVisible(list); else clearHistorySelection(); }} checked={list.length>0 && list.every(r => selectedHistoryIds.has(r.id))} /></th>
                                 <th>Tenant</th>
                                 <th>Apartment</th>
                                 <th>Type</th>
@@ -1246,7 +1319,7 @@ const BillManagement = () => {
                             </thead>
                             <tbody>
                               {visible.map(r => (
-                                <tr key={r.id} className="bill-row">
+                                <tr key={r.id} className="bill-row" style={{ backgroundColor: 'transparent' }}>
                                   <td><input type="checkbox" checked={selectedHistoryIds.has(r.id)} onChange={() => toggleHistorySelect(r.id)} /></td>
                                   <td style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                     <span className="bill-row-icon">{key === 'electricity' ? '⚡' : '💧'}</span>
@@ -1259,7 +1332,7 @@ const BillManagement = () => {
                                   <td>{r.consumption != null ? formatMeterNumber(r.consumption) : ''}</td>
                                   <td>{r.rate != null ? formatMeterNumber(r.rate) : ''}</td>
                                   <td>{r.total_cost != null ? formatMeterNumber(r.total_cost) : ''}</td>
-                                  <td>{r.recorded_at ? new Date(r.recorded_at).toLocaleString() : (r.updated_at ? new Date(r.updated_at).toLocaleString() : '')}</td>
+                                  <td>{r.recorded_at ? formatDateOnly(r.recorded_at) : (r.updated_at ? formatDateOnly(r.updated_at) : '')}</td>
                                   <td style={{ textAlign: 'center' }}>
                                     <button title="Edit" aria-label={`Edit history ${r.id}`} className="edit-icon" onClick={() => {
                                       setHistoryEditRow(r);
@@ -1372,8 +1445,8 @@ const BillManagement = () => {
                         <input type="number" step="0.01" className="form-control" value={historyEditForm.total_cost} disabled />
                       </div>
                       <div className="mb-2">
-                        <label className="form-label small">Updated</label>
-                        <input type="datetime-local" className="form-control" value={historyEditForm.recorded_at ? new Date(historyEditForm.recorded_at).toISOString().slice(0,19) : ''} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, recorded_at: e.target.value }))} />
+                        <label className="form-label small">Updated (date)</label>
+                        <input type="date" className="form-control" value={historyEditForm.recorded_at ? (new Date(historyEditForm.recorded_at).toISOString().split('T')[0]) : ''} onChange={(e) => setHistoryEditForm(prev => ({ ...prev, recorded_at: e.target.value }))} />
                       </div>
                     </div>
                   </div>

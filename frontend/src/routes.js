@@ -10,9 +10,9 @@ import BillManagement from "./components/Dashboard/BillManagement";
 import ApartmentManagement from "./components/Dashboard/ApartmentManagement";
 import MeterDeviceManagement from "./components/Dashboard/MeterDeviceManagement";
 import QRCodeGenerator from "./components/Dashboard/QRCodeGenerator";
-import QRReader from "./components/Dashboard/QRReader";
-import Reports from "./components/Dashboard/NotificationCenter";
+import Reports from "./components/Dashboard/Reports.js";
 import Layout from './components/Layout/Layout';
+import { RequireManager, RequireTenant } from './components/Layout/RoleGuard';
 import ApiTest from './pages/ApiTest';
 
 const AppRoutes = () => (
@@ -22,19 +22,18 @@ const AppRoutes = () => (
     <Route path="/tenant-login" element={<TenantLogin />} />
 
     {/* Protected app layout with persistent navbar */}
-    <Route element={<Layout />}>
-      <Route path="/property-manager-dashboard" element={<PropertyManagerDashboard />} />
-      <Route path="/tenant-dashboard" element={<TenantDashboard />} />
-      <Route path="/tenant-management" element={<TenantManagement />} />
-      <Route path="/bill-management" element={<BillManagement />} />
-      <Route path="/apartment-management" element={<ApartmentManagement />} />
-  <Route path="/meter-device-management" element={<MeterDeviceManagement />} />
-      <Route path="/qr-code-generator" element={<QRCodeGenerator />} />
-  <Route path="/qr-scanner" element={<QRReader />} />
-      <Route path="/reports" element={<Reports />} />
-  <Route path="/qr-codes" element={<QRCodeGenerator />} />
+  <Route element={<Layout />}>
+    <Route path="/property-manager-dashboard" element={<RequireManager><PropertyManagerDashboard /></RequireManager>} />
+    <Route path="/tenant-dashboard" element={<RequireTenant><TenantDashboard /></RequireTenant>} />
+    <Route path="/tenant-management" element={<RequireManager><TenantManagement /></RequireManager>} />
+    <Route path="/bill-management" element={<RequireManager><BillManagement /></RequireManager>} />
+    <Route path="/apartment-management" element={<RequireManager><ApartmentManagement /></RequireManager>} />
+  <Route path="/meter-device-management" element={<RequireManager><MeterDeviceManagement /></RequireManager>} />
+    <Route path="/qr-code-generator" element={<RequireManager><QRCodeGenerator /></RequireManager>} />
+    <Route path="/reports" element={<RequireManager><Reports /></RequireManager>} />
+  <Route path="/qr-codes" element={<RequireManager><QRCodeGenerator /></RequireManager>} />
   <Route path="/api-test" element={<ApiTest />} />
-    </Route>
+  </Route>
   </Routes>
 );
 

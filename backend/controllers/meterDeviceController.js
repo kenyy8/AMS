@@ -48,9 +48,34 @@ exports.getAll = async (req, res) => {
 
 exports.postReading = async (req, res) => {
   try {
-    const { deviceId, reading, timestamp } = req.body;
-  await MeterDevices.updateReadingByDeviceId(deviceId, reading, timestamp || new Date());
-    res.json({ message: 'Reading updated' });
+    // Accept either timestamp or reading_date (date-only) from client
+    const { deviceId, reading, timestamp, reading_date } = req.body;
+    const clientTs = reading_date || timestamp || undefined;
+
+    // Update device row: model will set last_reading_date/last_updated appropriately
+    await MeterDevices.updateReadingByDeviceId(deviceId, reading, clientTs || new Date());
+
+    // Try to insert meter history record for this reading (best-effort)
+    try {
+      const device = await MeterDevices.getDeviceByDeviceId(deviceId);
+      const history = {
+        tenant_name: device ? device.tenant_name : null,
+        apartment_number: device ? device.apartment_number : null,
+        device_id: deviceId,
+        meter_type: device ? device.meter_type : null,
+        previous_reading: null,
+        present_reading: reading,
+        consumption: null,
+        rate: device ? device.rate : null,
+        total_cost: null,
+        recorded_at: clientTs || new Date()
+      };
+      await MeterDevices.insertMeterHistory(history);
+    } catch (histErr) {
+      console.warn('Failed to insert meter history after postReading:', histErr && histErr.message ? histErr.message : histErr);
+    }
+
+    return res.json({ message: 'Reading updated' });
   } catch (e) {
     console.error('postReading error:', e);
     res.status(500).json({ message: 'Failed to update reading' });
@@ -63,7 +88,9 @@ exports.postReading = async (req, res) => {
 exports.updateReading = async (req, res) => {
   try {
     const id = req.params.id;
-    const { presentReading } = req.body;
+  const { presentReading } = req.body;
+  // accept optional timestamp from client (either lastUpdated or timestamp)
+  const clientTs = req.body.lastUpdated || req.body.timestamp || req.body.last_updated;
     if (presentReading === undefined || presentReading === null) return res.status(400).json({ message: 'presentReading is required' });
 
     const parsed = Number(presentReading);
@@ -72,7 +99,7 @@ exports.updateReading = async (req, res) => {
     // perform update
     let device, history;
     try {
-  const result = await MeterDevices.updateReadingById(id, parsed);
+  const result = await MeterDevices.updateReadingById(id, parsed, clientTs);
       device = result.device;
       history = result.history;
     } catch (innerErr) {
@@ -96,7 +123,7 @@ exports.updateReading = async (req, res) => {
         consumption: history.consumption,
         rate: history.rate,
         total_cost: history.total_cost,
-        recorded_at: new Date()
+        recorded_at: clientTs || new Date()
       });
     } catch (hbErr) {
       console.error('Failed to insert meter history:', hbErr);
@@ -163,8 +190,58 @@ exports.setRates = async (req, res) => {
 exports.create = async (req, res) => {
   try {
     const body = req.body || {};
+    // generate a stable device identifier when not provided, prefer apartment number/building
+    let generatedDeviceId;
+    try {
+      const aptPart = body.apartment_number ? String(body.apartment_number) : (body.apartmentId || body.apartment_id ? String(body.apartmentId || body.apartment_id) : null);
+      const bld = body.apartment_building || body.building || '';
+      const baseId = aptPart ? `apt:${aptPart}${bld ? '_' + String(bld) : ''}` : `dev-${Date.now() % 100000}-${Math.floor(Math.random()*9000)}`;
+
+      // Attempt to resolve apartment and count existing devices to choose suffix _1 or _2
+      let resolvedAptId = null;
+      try {
+        if (body.apartment_id || body.apartmentId) resolvedAptId = body.apartment_id || body.apartmentId;
+        else if (aptPart) {
+          // try to find apartment by apartment_number
+          const [aRows] = await require('../config/db').query('SELECT id FROM apartments WHERE apartment_number = ? LIMIT 1', [aptPart]);
+          if (aRows && aRows[0] && aRows[0].id) resolvedAptId = aRows[0].id;
+        }
+      } catch (e) {
+        // ignore resolution failures
+      }
+
+      if (resolvedAptId) {
+        try {
+          const [cntRows] = await require('../config/db').query('SELECT COUNT(*) AS cnt FROM meter_devices WHERE apartment_id = ?', [resolvedAptId]);
+          const cnt = (cntRows && cntRows[0] && cntRows[0].cnt) || 0;
+          if (cnt >= 2) {
+            return res.status(400).json({ message: 'Maximum of 2 devices allowed per apartment' });
+          }
+          const suffix = cnt === 0 ? '_1' : '_2';
+          generatedDeviceId = baseId + suffix;
+        } catch (e) {
+          generatedDeviceId = baseId + '_1';
+        }
+      } else {
+        // try baseId_1 then baseId_2
+        try {
+          const [r1] = await require('../config/db').query('SELECT COUNT(*) AS cnt FROM meter_devices WHERE device_id = ?', [baseId + '_1']);
+          if (r1 && r1[0] && r1[0].cnt === 0) generatedDeviceId = baseId + '_1';
+          else {
+            const [r2] = await require('../config/db').query('SELECT COUNT(*) AS cnt FROM meter_devices WHERE device_id = ?', [baseId + '_2']);
+            if (r2 && r2[0] && r2[0].cnt === 0) generatedDeviceId = baseId + '_2';
+            else return res.status(400).json({ message: 'Maximum of 2 devices allowed per apartment' });
+          }
+        } catch (e) {
+          generatedDeviceId = baseId + '_1';
+        }
+      }
+    } catch (e) {
+      generatedDeviceId = `dev-${Date.now() % 100000}-${Math.floor(Math.random()*9000)}`;
+    }
+
     const device = {
-      device_id: body.device_id || body.deviceId || body.deviceIdString || `dev-${Date.now() % 100000}-${Math.floor(Math.random()*9000)}`,
+  device_id: body.device_id || body.deviceId || body.deviceIdString || generatedDeviceId,
       meter_type: body.meter_type || body.meterType || 'Electricity Meter',
       type: body.type || 'meter',
       apartment_id: body.apartment_id || body.apartmentId || null,
@@ -230,8 +307,22 @@ exports.update = async (req, res) => {
   try {
     const id = req.params.id;
     const changes = req.body || {};
+  // normalize possible date field names from client
+  const normalized = { ...changes };
+  // PROTECTION: forbid updates that could change identity/relations
+  // Remove any fields which might reassign the device to another apartment/tenant
+  const forbidden = ['apartment_id', 'apartmentId', 'apartment_number', 'apartmentNumber', 'device_id', 'deviceId', 'tenant_id', 'tenantId'];
+  for (const f of forbidden) { if (f in normalized) delete normalized[f]; }
+    if (normalized.reading_date) { normalized.last_updated = normalized.reading_date; delete normalized.reading_date; }
+    if (normalized.readingDate) { normalized.last_updated = normalized.readingDate; delete normalized.readingDate; }
+    if (normalized.lastUpdated) { normalized.last_updated = normalized.lastUpdated; delete normalized.lastUpdated; }
+  // optionally convert last_updated to Date instance if string
+    if (normalized.last_updated) {
+      const ts = new Date(normalized.last_updated);
+      if (!isNaN(ts.getTime())) normalized.last_updated = ts;
+    }
     try {
-  const updated = await MeterDevices.updateDeviceById(id, changes);
+  const updated = await MeterDevices.updateDeviceById(id, normalized);
       return res.json(updated);
     } catch (dbErr) {
       console.error('DB update failed:', dbErr);

@@ -4,7 +4,8 @@ import './index.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import './theme.css';
+// theme.css merged into App.css
+import './App.css';
 import GlobalToasts from './components/Shared/GlobalToasts';
 
 const root = ReactDOM.createRoot(document.getElementById('root'));

@@ -2,10 +2,12 @@
 import axios from '../../axiosConfig';
 import { useNavigate } from 'react-router-dom';
 import GlobalHeader from '../Layout/GlobalHeader';
-import QuickScannerModal from '../Layout/QuickScannerModal';
-import ScanModal from '../Layout/ScanModal';
-import { formatMeterNumber, formatCurrencyPeso } from '../../utils/numberFormat';
-import '../../components/Dashboard/dashboard.css';
+import AdminScan from '../Common/AdminScan';
+import ScanResult from '../Common/ScanResult';
+// Tenant drawer is now handled inside AdminScan
+
+// number formatting helpers not used in this component currently
+// styles consolidated into App.css
 
 // Chart.js via react-chartjs-2 (chart.js already in package.json)
 import { Line, Doughnut } from 'react-chartjs-2';
@@ -20,83 +22,107 @@ import {
 	Legend,
 } from 'chart.js';
 import { ArcElement } from 'chart.js';
+import { Filler } from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 ChartJS.register(ArcElement);
-
-// Clean, single-component Property Manager Dashboard
-// - Summary cards on top
-// - Monthly Income chart (left) + Recent Bills (right) in top area
-// - Meter Devices below (Electricity / Water), top-3 with View More modals
+ChartJS.register(Filler);
 
 const PropertyManagerDashboard = () => {
-	// Monthly Income controls
-	const [incomeRange, setIncomeRange] = useState({ type: '6m' }); // '3m' | '6m' | '12m' | {from,to}
-	const [chartModalOpen, setChartModalOpen] = useState(false);
+
+		// Scanner modal state and button
+		const [isScanModalOpen, setIsScanModalOpen] = useState(false);
+		// scanned result/state for showing the result modal after scanner closes
+		const [scannedResult, setScannedResult] = useState(null);
+		const [isResultModalOpen, setIsResultModalOpen] = useState(false);
+		// drawer state moved into AdminScan; dashboard only opens the scanner
+		const ScanButton = () => {
+			return (
+				<button className="btn btn-primary" onClick={() => setIsScanModalOpen(true)} title="Dashboard Scan">Scan</button>
+			);
+		};
+
+
+	// local UI & data state (ensure these are declared before any helper components/functions)
+	const [loading, setLoading] = useState(true);
+	const [stats, setStats] = useState({ totalTenants: 0, totalApartments: 0, occupiedApartments: 0, overdueBills: 0, totalRevenue: 0, rentIncome: 0, utilityCollections: 0 });
+	const [allBills, setAllBills] = useState([]);
+	// some dashboard state is kept for layout features; silence unused warnings
+	// eslint-disable-next-line no-unused-vars
+	const [apartmentsData, setApartmentsData] = useState([]);
+	const [monthlyPayments, setMonthlyPayments] = useState([]);
+	// eslint-disable-next-line no-unused-vars
+	const [recentBills, setRecentBills] = useState([]);
+	// eslint-disable-next-line no-unused-vars
+	const [meterDevices, setMeterDevices] = useState([]);
+	const [tenantsData, setTenantsData] = useState([]);
+	// eslint-disable-next-line no-unused-vars
 	const [monthlyLabel, setMonthlyLabel] = useState('');
 	const [monthlyTotal, setMonthlyTotal] = useState(0);
-		const [stats, setStats] = useState({ totalTenants: 0, totalApartments: 0, occupiedApartments: 0, overdueBills: 0, totalRevenue: 0, rentIncome: 0, utilityCollections: 0 });
-		const [tenantsData, setTenantsData] = useState([]);
-		const [apartmentsData, setApartmentsData] = useState([]);
-	const [allBills, setAllBills] = useState([]);
-	const [monthlyPayments, setMonthlyPayments] = useState([]);
-	const [recentBills, setRecentBills] = useState([]);
-	const [meterDevices, setMeterDevices] = useState([]);
-	const [loading, setLoading] = useState(true);
-	const [scannerOpen, setScannerOpen] = useState(false);
-	const [scanModalOpen, setScanModalOpen] = useState(false);
-	const [scanModalData, setScanModalData] = useState(null);
-	const [modalOpen, setModalOpen] = useState({ recentBills: false, electricity: false, water: false });
+	// eslint-disable-next-line no-unused-vars
+	const [incomeRange, setIncomeRange] = useState({ type: '6m' });
+
+	// UI modals / controls
+	// scannerOpen state removed; scanner is modal-based
+	const [chartModalOpen, setChartModalOpen] = useState(false);
 	const [paymentModalOpen, setPaymentModalOpen] = useState(false);
 	const [occupancyModalOpen, setOccupancyModalOpen] = useState(false);
 	const [insightsModalOpen, setInsightsModalOpen] = useState(false);
+
+	// routing/navigation
 	const navigate = useNavigate();
 
+	// navigation items passed to GlobalHeader
 	const navItems = [
-		{ key: 'dashboard', label: 'Dashboard', to: '/property-manager-dashboard' },
-		{ key: 'tenants', label: 'Tenants', to: '/tenant-management' },
-		{ key: 'bills', label: 'Bills', to: '/bill-management' },
-		{ key: 'apartments', label: 'Apartments', to: '/apartment-management' },
-		{ key: 'meter', label: 'Meter', to: '/meter-device-management' },
-		{ key: 'qrcodes', label: 'QR Codes', to: '/qr-code-generator' },
-		{ key: 'reports', label: 'Reports', to: '/reports' }
+		{ to: '/property-manager-dashboard', label: 'Dashboard' },
+		{ to: '/tenant-management', label: 'Tenants' },
+		{ to: '/bill-management', label: 'Bills' },
+		{ to: '/apartment-management', label: 'Apartments' },
+		{ to: '/meter-device-management', label: 'Meter' },
+		{ to: '/qr-code-generator', label: 'QR Codes' },
+		{ to: '/reports', label: 'Reports' },
 	];
 
 	// helper: determine if a bill is paid
 	const isPaid = (b) => {
 		if (!b) return false;
 		const status = (b.status || '').toString().toLowerCase();
-		if (status.includes('paid')) return true;
-		if (b.paid === true) return true;
-		if (b.paid_at || b.payment_date || b.paymentTimestamp) return true;
+		if (status === 'paid' || status === 'completed' || status === 'settled') return true;
+		// fallback: look for amount_paid or payment marker
+		if (Number(b.amount_paid || b.paid_amount || 0) > 0) return true;
 		return false;
 	};
 
-	// helper: infer payment_type when missing
-	const inferPaymentType = (row) => {
-		const pt = (row.payment_type || '').toString().toUpperCase();
-		if (pt) return pt;
-		const bt = (row.bill_type || '').toString().toLowerCase();
-		if (bt.includes('water') || bt.includes('elect') || bt.includes('elec')) return 'UTILITY';
+	// infer payment type from a payment or bill object
+	const inferPaymentType = (item) => {
+		if (!item) return 'RENT';
+		const pt = (item.payment_type || item.paymentType || item.bill_type || item.type || '').toString().toLowerCase();
+		if (pt.includes('util') || pt.includes('water') || pt.includes('electric')) return 'UTILITY';
+		if (pt.includes('rent')) return 'RENT';
+		// some payment_history rows may include metadata
+		if (item.description && item.description.toLowerCase().includes('utility')) return 'UTILITY';
 		return 'RENT';
 	};
 
-	// helper: determine if a bill is overdue by business rule (7 days past due)
+	// overdue rule: check status or due_date vs today
 	const isOverdueByRule = (b) => {
-		if (!b || !b.due_date) return false;
-		const due = new Date(b.due_date);
-		if (isNaN(due)) return false;
-		const now = new Date();
-		const diffMs = now.getTime() - due.getTime();
-		const diffDays = diffMs / (1000 * 60 * 60 * 24);
-		return diffDays > 7; // strictly greater than 7 days past due
+		if (!b) return false;
+		const status = (b.status || '').toString().toLowerCase();
+		if (status && (status.includes('over') || status.includes('late') || status.includes('past_due') || (status.includes('due') && !status.includes('paid')))) {
+			if (!status.includes('paid')) return true;
+		}
+		if (b.due_date) {
+			const d = new Date(b.due_date);
+			if (!isNaN(d) && d < new Date() && status !== 'paid') return true;
+		}
+		return false;
 	};
 
-		// MonthlyIncomeChart supports dynamic ranges and ensures y-axis starts at zero.
-	const MonthlyIncomeChart = ({ bills, payments, range = { type: '6m' }, compact = true, showHeader = true, onTotals = null, bare = false }) => {
-			const now = new Date();
+// MonthlyIncomeChart supports dynamic ranges and ensures y-axis starts at zero.
+const MonthlyIncomeChart = ({ bills, payments, range = { type: '6m' }, compact = true, showHeader = true, onTotals = null, bare = false }) => {
+	const now = new Date();
 
-			// resolve range into months and labels
+	// resolve range into months and labels
 			let months = 6;
 			let fromDate = null;
 			let toDate = now;
@@ -183,14 +209,20 @@ const PropertyManagerDashboard = () => {
 						pointRadius: 3,
 					}
 				]
+			/* eslint-disable react-hooks/exhaustive-deps */
+			/* eslint-disable react-hooks/exhaustive-deps */
 			}), [labels.join('|'), cumRent.join('|'), cumUtility.join('|')]);
+			/* eslint-enable react-hooks/exhaustive-deps */
+			/* eslint-enable react-hooks/exhaustive-deps */
 
 			// report totals back to parent if callback provided
 			useEffect(() => {
 				if (typeof onTotals === 'function') {
 					onTotals({ label: fromDate ? 'Cumulative Collections (custom)' : `Cumulative Collections (last ${labels.length})`, total: totals.reduce((s, n) => s + n, 0) });
 				}
+			/* eslint-disable react-hooks/exhaustive-deps */
 			}, [labels.join('|'), totals.join('|')]);
+			/* eslint-enable react-hooks/exhaustive-deps */
 
 			const maxY = Math.max(...totals, 0);
 			const suggestedMax = Math.ceil(maxY * 1.15) || 1;
@@ -264,7 +296,7 @@ const PropertyManagerDashboard = () => {
 			);
 		};
 
-	const fetchDashboardData = async () => {
+	const fetchDashboardData = React.useCallback(async () => {
 		try {
 			const [tenantsRes, apartmentsRes, billsRes, devicesRes, paymentHistoryRes] = await Promise.all([
 				axios.get('/api/tenants'),
@@ -299,7 +331,7 @@ const PropertyManagerDashboard = () => {
 					if (!isNaN(d) && d < today && status !== 'paid') return true;
 				}
 				return false;
-			};
+				};
 
 			// totalRevenue should only include payment_history sums
 			const totalRevenueFromPayments = payments.reduce((s, p) => s + (Number(p.amount_paid || 0)), 0);
@@ -314,11 +346,11 @@ const PropertyManagerDashboard = () => {
 			setAllBills(prev => prev); // keep bills for other UIs
 			// store payments in a local var for MonthlyIncomeChart via closure; use setState for payments if needed
 			setMonthlyPayments(payments);
-			// Prioritize overdue (by rule), then pending, then most recent due/created. Keep paused bills demoted.
+			// Prioritize overdue (by rule), then pending, then most recent due/created. Demote non-active tenants.
 			setRecentBills(bills.slice().sort((a,b) => {
-				const pausedA = Boolean(a.is_paused || a.tenant_is_paused || a.status === 'paused');
-				const pausedB = Boolean(b.is_paused || b.tenant_is_paused || b.status === 'paused');
-				if (pausedA !== pausedB) return pausedA ? 1 : -1;
+				const aActive = (a.status || a.tenant_status) === 'active';
+				const bActive = (b.status || b.tenant_status) === 'active';
+				if (aActive !== bActive) return aActive ? -1 : 1;
 				const overdueA = isOverdueByRule(a) ? 1 : 0;
 				const overdueB = isOverdueByRule(b) ? 1 : 0;
 				if (overdueA !== overdueB) return overdueA > overdueB ? -1 : 1; // overdue first
@@ -337,10 +369,10 @@ const PropertyManagerDashboard = () => {
 			setTenantsData(tenants);
 		} catch (err) {
 			console.error('Failed to fetch dashboard data', err);
-		} finally {
-			setLoading(false);
-		}
-	};
+			} finally {
+				setLoading(false);
+			}
+		}, []);
 
 	// Recompute totalRevenue whenever payments change
 	useEffect(() => {
@@ -358,11 +390,12 @@ const PropertyManagerDashboard = () => {
 		let fromDate = null;
 		let toDate = now;
 		let months = 6;
-		if (typeof incomeRange === 'string') incomeRange = { type: incomeRange };
-		if (incomeRange?.type === '3m') months = 3;
-		else if (incomeRange?.type === '6m') months = 6;
-		else if (incomeRange?.type === '12m') months = 12;
-		else if (incomeRange?.from && incomeRange?.to) { fromDate = new Date(incomeRange.from); toDate = new Date(incomeRange.to); }
+		// do not reassign props/state variables — copy to a local variable
+		const ir = (typeof incomeRange === 'string') ? { type: incomeRange } : (incomeRange || { type: '6m' });
+		if (ir.type === '3m') months = 3;
+		else if (ir.type === '6m') months = 6;
+		else if (ir.type === '12m') months = 12;
+		else if (ir.from && ir.to) { fromDate = new Date(ir.from); toDate = new Date(ir.to); }
 
 		const labels = [];
 		if (fromDate) {
@@ -401,19 +434,18 @@ const PropertyManagerDashboard = () => {
 		const onBillUpdated = () => fetchDashboardData();
 		window.addEventListener('app:bill-updated', onBillUpdated);
 		return () => window.removeEventListener('app:bill-updated', onBillUpdated);
-	}, []);
+	}, [fetchDashboardData]);
 
 	useEffect(() => {
 		const token = localStorage.getItem('token');
 		if (!token) { navigate('/property-manager-login'); return; }
+		// initial one-time fetch when dashboard mounts
 		fetchDashboardData();
-		const t = setInterval(fetchDashboardData, 30000);
+		// Keep a listener so the global Refresh button can trigger a manual reload
 		const onRefresh = () => fetchDashboardData();
 		window.addEventListener('app:refresh-dashboard', onRefresh);
-		const onQRResolved = (e) => { if (e?.detail && e.detail.tenant) { setScanModalData({ tenant: e.detail.tenant, bills: e.detail.bills || [] }); setScanModalOpen(true); setScannerOpen(false); } };
-		window.addEventListener('app:qr-resolved', onQRResolved);
-		return () => { clearInterval(t); window.removeEventListener('app:refresh-dashboard', onRefresh); window.removeEventListener('app:qr-resolved', onQRResolved); };
-	}, [navigate]);
+			 return () => { window.removeEventListener('app:refresh-dashboard', onRefresh); };
+	}, [navigate, fetchDashboardData]);
 
 	// loading is handled in the render to avoid early returns that change hook order
 
@@ -433,13 +465,16 @@ const PropertyManagerDashboard = () => {
 	}, 0);
 	const rentCollected = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'RENT') ? Number(p.amount_paid || p.amount || 0) : 0), 0);
 	const utilityCollected = monthlyPayments.reduce((s, p) => s + ((String(p.payment_type||'RENT').toUpperCase() === 'UTILITY') ? Number(p.amount_paid || p.amount || 0) : 0), 0);
+	// eslint-disable-next-line no-unused-vars
 	const totalCollected = monthlyPayments.reduce((s, p) => s + Number(p.amount_paid || p.amount || 0), 0);
 	const rentCollectionRate = rentBilled > 0 ? Math.round((rentCollected / rentBilled) * 100) : (rentCollected > 0 ? 100 : 0);
 	const utilityCollectionRate = utilityBilled > 0 ? Math.round((utilityCollected / utilityBilled) * 100) : (utilityCollected > 0 ? 100 : 0);
 
 	// Action center metrics
+	// eslint-disable-next-line no-unused-vars
 	const overdueCount = allBills.filter(b => !isPaid(b) && isOverdueByRule(b)).length;
 	const now = new Date();
+	// eslint-disable-next-line no-unused-vars
 	const latePayersCount = allBills.filter(b => !isPaid(b) && b.due_date && (new Date(b.due_date) < now)).length;
 
 	// Compute Payment Status exactly as requested:
@@ -460,9 +495,7 @@ const PropertyManagerDashboard = () => {
 	});
 	const unpaidTotal = unpaidBills.reduce((s, b) => s + Number(b.amount_due || b.amount || 0), 0);
 
-	// Logging to help validate sources
-	console.log('Paid DB:', paidTotal);
-	console.log('Unpaid DB:', unpaidTotal);
+	// Logging removed to avoid console spam during normal operation
 
 	const paymentStatusData = {
 		labels: ['Paid (history)', 'Unpaid (bills)'],
@@ -475,50 +508,98 @@ const PropertyManagerDashboard = () => {
 	const paidPercent = (paidTotal + unpaidTotal) > 0 ? Math.round((paidTotal / (paidTotal + unpaidTotal)) * 100) : null;
 
 	// Property Insights (computed client-side from available data)
-	// Top rent contributor (by apartment) from payments
-	let topRentContributor = null;
+	// Top Tenant Payments: derive from payment history (monthlyPayments)
+	// We want the most recent payments grouped by tenant and sorted by most recent payment date.
+	let topTenantPaymentsList = [];
 	try {
-		const rentPayments = (monthlyPayments || []).filter(p => String(p.payment_type || 'RENT').toUpperCase() === 'RENT');
-		const byApt = {};
-		rentPayments.forEach(p => {
-			const apt = p.apartment_id || p.apartment || p.apartmentId || p.apartment_id || 'unknown';
-			byApt[apt] = (byApt[apt] || 0) + Number(p.amount_paid || p.amount || 0);
+		const payments = Array.isArray(monthlyPayments) ? monthlyPayments.slice() : [];
+		// normalize tenant id and payment date
+		const byTenant = {};
+		payments.forEach(p => {
+			const tid = p.tenant_id || p.tenant || p.tenantId || p.account_id || 'unknown';
+			const paidAt = p.paid_at || p.paidAt || p.created_at || p.createdAt || p.date || null;
+			const amt = Number(p.amount_paid || p.amount || 0) || 0;
+			if (!byTenant[tid]) byTenant[tid] = { tenantId: tid, lastPaidAt: paidAt ? new Date(paidAt) : null, totalPaid: 0, payments: [] };
+			byTenant[tid].totalPaid += amt;
+			if (paidAt) {
+				const d = new Date(paidAt);
+				if (!isNaN(d) && (!byTenant[tid].lastPaidAt || d > byTenant[tid].lastPaidAt)) byTenant[tid].lastPaidAt = d;
+			}
+			byTenant[tid].payments.push({ amount: amt, paidAt, raw: p });
 		});
-		const entries = Object.entries(byApt).filter(([k]) => k && k !== 'unknown');
-		if (entries.length) {
-			entries.sort((a,b) => b[1] - a[1]);
-			topRentContributor = { apartment: entries[0][0], amount: entries[0][1] };
-		}
-	} catch(e) { /* ignore */ }
+		topTenantPaymentsList = Object.values(byTenant).filter(t => t.tenantId && t.tenantId !== 'unknown').sort((a,b) => {
+			// sort by lastPaidAt desc, then totalPaid desc
+			const ta = a.lastPaidAt ? a.lastPaidAt.getTime() : 0;
+			const tb = b.lastPaidAt ? b.lastPaidAt.getTime() : 0;
+			if (tb !== ta) return tb - ta;
+			return b.totalPaid - a.totalPaid;
+		});
+	} catch (e) { topTenantPaymentsList = []; }
 
-	const utilityRecoveryPercent = utilityBilled > 0 ? Math.round(((utilityCollected || 0) / utilityBilled) * 100) : null;
-
-	// Most overdue tenant (by total overdue amount)
-	let mostOverdueTenant = null;
+	// Most overdue tenants: top 3 by total overdue amount, include bill types set
+	let mostOverdueList = [];
 	try {
-		const overdueMap = {};
+		const map = {};
 		(allBills || []).forEach(b => {
-			if (!isPaid(b) && isOverdueByRule(b)) {
-				const tid = b.tenant_id || b.tenantId || b.tenant || 'unknown';
-				overdueMap[tid] = (overdueMap[tid] || 0) + Number(b.amount_due || b.amount || 0);
+			if (!b) return;
+			if (isPaid(b)) return;
+			if (!isOverdueByRule(b)) return;
+			const tid = b.tenant_id || b.tenant || b.tenantId || 'unknown';
+			const amt = Number(b.amount_due || b.amount || 0) || 0;
+			const bt = (b.bill_type || b.type || b.payment_type || '').toString();
+			if (!map[tid]) map[tid] = { tenantId: tid, totalOverdue: 0, billTypes: new Set(), bills: [] };
+			map[tid].totalOverdue += amt;
+			if (bt) map[tid].billTypes.add(bt);
+			map[tid].bills.push(b);
+		});
+		mostOverdueList = Object.values(map).filter(t => t.tenantId && t.tenantId !== 'unknown').map(t => ({ tenantId: t.tenantId, totalOverdue: t.totalOverdue, billTypes: Array.from(t.billTypes).slice(0,3), bills: t.bills })).sort((a,b) => b.totalOverdue - a.totalOverdue).slice(0,3);
+	} catch (e) { mostOverdueList = []; }
+
+	// Frequent late payers: based on bill history and payment history. We'll count bills where payment came after due_date or never paid and overdue.
+	let frequentLatePayersList = [];
+	try {
+		// Build payment lookup by bill id or by tenant and bill due_date
+		const payments = Array.isArray(monthlyPayments) ? monthlyPayments : [];
+		const paymentsByBill = {};
+		payments.forEach(p => {
+			const bid = p.bill_id || p.billId || p.source_bill_id || null;
+			if (bid) {
+				paymentsByBill[bid] = paymentsByBill[bid] || [];
+				paymentsByBill[bid].push(p);
 			}
 		});
-		const overdueEntries = Object.entries(overdueMap).filter(([k]) => k && k !== 'unknown');
-		if (overdueEntries.length) {
-			overdueEntries.sort((a,b) => b[1] - a[1]);
-			mostOverdueTenant = { tenantId: overdueEntries[0][0], amount: overdueEntries[0][1] };
-		}
-	} catch(e) {}
 
-	// Frequent late payers (count of overdue bills per tenant)
-	let frequentLatePayers = [];
-	try {
-		const freq = {};
-		(allBills || []).forEach(b => { if (!isPaid(b) && isOverdueByRule(b)) { const tid = b.tenant_id || b.tenant || 'unknown'; freq[tid] = (freq[tid] || 0) + 1; } });
-		frequentLatePayers = Object.entries(freq).filter(([k]) => k && k !== 'unknown').map(([tenantId, cnt]) => ({ tenantId, count: cnt })).sort((a,b) => b.count - a.count).slice(0,5);
-	} catch(e) {}
+		const freqMap = {};
+		(allBills || []).forEach(b => {
+			if (!b) return;
+			const tid = b.tenant_id || b.tenant || b.tenantId || 'unknown';
+			const due = b.due_date ? new Date(b.due_date) : null;
+			// find payments for this bill if any
+			const bid = b.id || b.bill_id || b.billId || null;
+			const relatedPayments = bid ? (paymentsByBill[bid] || []) : [];
+			let wasLate = false;
+			if (relatedPayments.length > 0) {
+				// if any payment has paid_at after due_date -> late
+				for (const rp of relatedPayments) {
+					const paidAt = rp.paid_at || rp.paidAt || rp.created_at || rp.createdAt || null;
+					if (paidAt && due) {
+						const pd = new Date(paidAt);
+						if (!isNaN(pd) && pd > due) { wasLate = true; break; }
+					}
+				}
+			} else {
+				// no payments: if overdue by rule, count as late/overdue
+				if (!isPaid(b) && isOverdueByRule(b)) wasLate = true;
+			}
+			if (wasLate) {
+				freqMap[tid] = (freqMap[tid] || 0) + 1;
+			}
+		});
+		frequentLatePayersList = Object.entries(freqMap).filter(([k]) => k && k !== 'unknown').map(([tenantId, count]) => ({ tenantId, count })).sort((a,b) => b.count - a.count).slice(0,3);
+	} catch (e) { frequentLatePayersList = []; }
 
 	// Occupancy trend: compute monthly occupied units using tenants' move_in_date (Tenant Management)
+	/* eslint-disable react-hooks/exhaustive-deps */
 	const { occupancyLabels, occupancySeries, totalOccupied, moveInsThisMonth } = React.useMemo(() => {
 		const months = 6;
 		const now = new Date();
@@ -526,6 +607,7 @@ const PropertyManagerDashboard = () => {
 		const series = [];
 		for (let i = months - 1; i >= 0; i--) {
 			const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+			// eslint-disable-next-line no-unused-vars
 			const start = new Date(dt.getFullYear(), dt.getMonth(), 1);
 			const end = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
 			labels.push(dt.toLocaleString(undefined, { month: 'short', year: 'numeric' }));
@@ -563,12 +645,20 @@ const PropertyManagerDashboard = () => {
 		}).length;
 		return { occupancyLabels: labels, occupancySeries: series, totalOccupied: total, moveInsThisMonth: moveIns };
 	}, [tenantsData]);
+	/* eslint-enable react-hooks/exhaustive-deps */
 
 	// also compute vacant series for modal view
-	const occupancyData = React.useMemo(() => ({
-		labels: occupancyLabels,
-		datasets: [{ label: 'Occupied', data: occupancySeries, borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.12)', fill: true, tension: 0.3 }]
-	}), [occupancyLabels.join('|'), occupancySeries.join('|')]);
+	const _occupancyLabelsKey = Array.isArray(occupancyLabels) ? occupancyLabels.join('|') : '';
+	const _occupancySeriesKey = Array.isArray(occupancySeries) ? occupancySeries.join('|') : '';
+	// occupancyLabels and occupancySeries are derived from tenantsData and we use their joined keys in deps
+	const occupancyData = React.useMemo(() => {
+		const _computedOccupancyLabels = _occupancyLabelsKey ? _occupancyLabelsKey.split('|') : [];
+		const _computedOccupancySeries = _occupancySeriesKey ? _occupancySeriesKey.split('|').map(n => Number(n || 0)) : [];
+		return {
+			labels: _computedOccupancyLabels,
+			datasets: [{ label: 'Occupied', data: _computedOccupancySeries, borderColor: '#3498db', backgroundColor: 'rgba(52,152,219,0.12)', fill: true, tension: 0.3 }]
+		};
+	}, [_occupancyLabelsKey, _occupancySeriesKey]);
 
 	// Tenant growth: try to compute monthly tenant counts from tenantsData if available
 	const tenantLabels = [];
@@ -590,6 +680,7 @@ const PropertyManagerDashboard = () => {
 		}
 	}
 
+	// eslint-disable-next-line no-unused-vars
 	const tenantGrowthData = {
 		labels: tenantLabels.length ? tenantLabels : occupancyLabels,
 		datasets: [{ label: 'New Tenants', data: tenantSeries.length ? tenantSeries : occupancySeries.map(() => 0), borderColor: '#9b59b6', backgroundColor: 'rgba(155,89,182,0.05)', fill: true, tension: 0.3 }]
@@ -600,15 +691,20 @@ const PropertyManagerDashboard = () => {
 			{loading && <div className="container-fluid"><div className="text-center">Loading...</div></div>}
 			<GlobalHeader navItems={navItems} />
 
-			<div style={{ position: 'absolute', right: 20, top: 84, zIndex: 50 }}>
-				<button className="btn btn-primary" onClick={() => setScannerOpen(true)} title="Dashboard Scan">Scan</button>
-			</div>
+				{/* Centered Scan button - responsive and remains visually distinct */}
+										<div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0 1rem' }}>
+												<ScanButton />
+										</div>
 
-			<QuickScannerModal open={scannerOpen} onClose={() => setScannerOpen(false)} />
-			{scanModalOpen && scanModalData && <ScanModal open={scanModalOpen} onClose={() => setScanModalOpen(false)} tenantPayload={scanModalData} />}
+										{isScanModalOpen && (
+											<AdminScan open={true} onClose={() => setIsScanModalOpen(false)} onResult={(result) => { setScannedResult(result); setIsResultModalOpen(true); }} />
+										)}
+										{/* Render the result modal separately so the scanner can close immediately */}
+										<ScanResult open={isResultModalOpen} onClose={() => { setIsResultModalOpen(false); setScannedResult(null); }} scannedData={scannedResult} />
+
 
 			<div className="container-fluid mgr-main">
-				<div className="center-nav-wrap text-center mb-3"><nav className="center-nav">{navItems.map(item => <button key={item.key} className="center-nav-item" onClick={() => navigate(item.to)}>{item.label}</button>)}</nav></div>
+				{/* navigation is provided by the global header; inline center-nav removed to avoid duplication */}
 
 				{/* KPI Row 1 */}
 				<div className="row mb-3">
@@ -666,71 +762,99 @@ const PropertyManagerDashboard = () => {
 					</div>
 				</div>
 
-				{/* Graphs Row */}
-				<div className="row mb-4 pm-charts-grid">
-					<div className="col-12 col-md-6 col-lg-3 mb-3">
-						<div className="card card-glass p-2 pm-mini-chart">
-							<div className="d-flex justify-content-between align-items-center mb-2">
-								<div className="small text-muted">Rent & Utility Cash Flow</div>
-								<button className="btn btn-sm btn-outline-secondary" onClick={() => setChartModalOpen(true)}>Expand</button>
+				{/* Analytics mini-cards: uniform grid of four compact cards */}
+				<div className="pm-charts-grid mb-4" style={{ marginTop: '8px' }}>
+					<div className="pm-mini-chart card card-glass p-3">
+						<div className="d-flex justify-content-between align-items-start">
+							<div>
+								<div className="text-muted small">Rent & Utility Cash Flow</div>
+								<div className="h5">{`₱${(monthlyTotal||0).toLocaleString()}`}</div>
 							</div>
-							<div style={{ height: 120, padding: 4 }}>
-								<MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={true} showHeader={false} bare={true} />
+							<div>
+								<button className="btn btn-sm btn-outline-secondary" aria-label="Expand Cash Flow" onClick={() => setChartModalOpen(true)}>View</button>
+							</div>
+						</div>
+						<div className="pm-mini-chart-body">
+							<div className="pm-mini-chart-chart">
+								<MonthlyIncomeChart payments={monthlyPayments} range={incomeRange} compact={true} bare={true} />
 							</div>
 						</div>
 					</div>
-					<div className="col-12 col-md-6 col-lg-3 mb-3">
-						<div className="card card-glass p-2 pm-mini-chart">
-							<div className="d-flex justify-content-between align-items-center mb-2">
-								<div className="small text-muted">Payment Status</div>
-								<button className="btn btn-sm btn-outline-secondary" onClick={async () => { await fetchDashboardData(); setPaymentModalOpen(true); }}>Expand</button>
+
+					<div className="pm-mini-chart card card-glass p-3">
+						<div className="d-flex justify-content-between align-items-start">
+							<div>
+								<div className="text-muted small">Payment Status</div>
+								<div className="h5">{paidPercent !== null ? `${paidPercent}% Paid` : 'No data'}</div>
 							</div>
-							<div style={{ height: 120 }} className="d-flex align-items-center justify-content-center flex-column">
-								{((allBills || []).length === 0 && (monthlyPayments || []).length === 0) ? (
-									<div className="text-muted">No data available</div>
-								) : (
-									<>
-										<div style={{ width: 80, height: 80 }}>
-											<Doughnut data={paymentStatusData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
-										</div>
-										<div className="text-muted small mt-2">{`₱${collectedAmount.toLocaleString()} collected / ₱${(totalUnpaidAmount||0).toLocaleString()} unpaid`}{paidPercent !== null ? ` — ${paidPercent}% Paid` : ''}</div>
-									</>
-								)}
+							<div>
+								<button className="btn btn-sm btn-outline-secondary" aria-label="Expand Payment Status" onClick={() => setPaymentModalOpen(true)}>View</button>
+							</div>
+						</div>
+						<div className="pm-mini-chart-body">
+							<div className="pm-mini-chart-chart">
+								{/* donut chart placeholder - reuse paymentStatusData */}
+								<Doughnut data={paymentStatusData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }} />
 							</div>
 						</div>
 					</div>
-					<div className="col-12 col-md-6 col-lg-3 mb-3">
-						<div className="card card-glass p-2 pm-mini-chart">
-							<div className="d-flex justify-content-between align-items-center mb-2">
-								<div className="small text-muted">Occupancy Trend</div>
-								<button className="btn btn-sm btn-outline-secondary" onClick={() => setOccupancyModalOpen(true)}>Expand</button>
+
+					<div className="pm-mini-chart card card-glass p-3">
+						<div className="d-flex justify-content-between align-items-start">
+							<div>
+								<div className="text-muted small">Occupancy Trend</div>
+								<div className="h5">{`${totalOccupied}`}</div>
 							</div>
-							<div style={{ height: 120 }}>
-								{(occupancySeries.length === 0) ? <div className="text-muted text-center">No data available</div> : <Line data={occupancyData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (ctx) => `Occupied: ${ctx.parsed.y}` } } }, scales: { x: { display: true, title: { display: true, text: 'Month' }, grid: { color: 'rgba(0,0,0,0.04)' } }, y: { display: true, title: { display: true, text: 'Occupied Units' }, grid: { color: 'rgba(0,0,0,0.06)' }, beginAtZero: true, ticks: { precision: 0 } } } }} />}
+							<div>
+								<button className="btn btn-sm btn-outline-secondary" aria-label="Expand Occupancy" onClick={() => setOccupancyModalOpen(true)}>View</button>
 							</div>
-							<div className="text-muted small mt-2" style={{ padding: '8px 6px 0' }}>{`Total Occupied Units: ${totalOccupied} — Move-ins this month: ${moveInsThisMonth}`}</div>
+						</div>
+						<div className="pm-mini-chart-body">
+							<div className="pm-mini-chart-chart">
+								{/* inline small line chart */}
+								<Line data={occupancyData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, filler: { propagate: true } }, scales: { x: { display: false }, y: { display: false, beginAtZero: true } } }} />
+							</div>
 						</div>
 					</div>
-					{/* Tenant Growth removed per request */}
-					{/* Action Center compact mini-card placed next to Occupancy Trend */}
-					<div className="col-12 col-md-6 col-lg-3 mb-3">
-						<div className="card card-glass p-2 pm-mini-chart">
-							<div className="d-flex justify-content-between align-items-center mb-2">
-								<div className="small text-muted">Property Insights</div>
-								<button className="btn btn-sm btn-outline-secondary" onClick={() => setInsightsModalOpen(true)}>View</button>
+
+					<div className="pm-mini-chart card card-glass p-3">
+						<div className="d-flex justify-content-between align-items-start">
+							<div>
+								<div className="text-muted small">Top Tenant Payments</div>
+								<div className="h6" style={{ fontSize: '0.95rem' }}>{(topTenantPaymentsList && topTenantPaymentsList.length) ? (() => {
+									const t = topTenantPaymentsList[0];
+									// try to resolve friendly name from tenantsData
+									const tenantObj = (tenantsData||[]).find(x => (x.id === t.tenantId || x.tenant_id === t.tenantId || String(x.id) === String(t.tenantId) || String(x.tenant_id) === String(t.tenantId)));
+									const name = tenantObj ? (tenantObj.name || tenantObj.full_name || `${tenantObj.first_name || ''} ${tenantObj.last_name || ''}`.trim()) : t.tenantId;
+									return `${name} — ₱${(t.totalPaid||0).toLocaleString()}`;
+								})() : 'No payments this month'}</div>
 							</div>
-							<div style={{ height: 120, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-								<div style={{ padding: '6px 8px' }}>
-									<div className="text-muted small">Top Rent Contributor</div>
-									<div className="h6">{topRentContributor ? `${topRentContributor.apartment} — ₱${topRentContributor.amount.toLocaleString()}` : 'No data'}</div>
-									<div style={{ height: 8 }} />
-									<div className="text-muted small">Utility Recovery</div>
-									<div className="h6">{utilityRecoveryPercent !== null ? `${utilityRecoveryPercent}%` : 'No data'}</div>
-								</div>
+							<div>
+								<button className="btn btn-sm btn-outline-secondary" aria-label="Expand Insights" onClick={() => setInsightsModalOpen(true)}>View</button>
+							</div>
+						</div>
+						<div className="pm-mini-chart-body text-muted small">
+							{/* Wrap child content in a single block so lines stack vertically inside the flex container */}
+							<div style={{ width: '100%', display: 'block' }}>
+								<div style={{ fontSize: '0.85rem', marginBottom: '0.25rem' }}>{(mostOverdueList && mostOverdueList.length) ? (() => {
+									const m = mostOverdueList[0];
+									const tObj = (tenantsData||[]).find(x => (x.id === m.tenantId || x.tenant_id === m.tenantId || String(x.id) === String(m.tenantId) || String(x.tenant_id) === String(m.tenantId)));
+									const name = tObj ? (tObj.name || tObj.full_name || `${tObj.first_name || ''} ${tObj.last_name || ''}`.trim()) : m.tenantId;
+									const type = (m.billTypes && m.billTypes.length) ? m.billTypes[0] : '';
+									return `Most Overdue: ${name} — ₱${(m.totalOverdue||0).toLocaleString()}${type ? ' ('+type+')' : ''}`;
+								})() : 'Most Overdue: N/A'}</div>
+								<div style={{ fontSize: '0.85rem' }}>{(frequentLatePayersList && frequentLatePayersList.length) ? (() => {
+									const f = frequentLatePayersList[0];
+									const tObj = (tenantsData||[]).find(x => (x.id === f.tenantId || x.tenant_id === f.tenantId || String(x.id) === String(f.tenantId) || String(x.tenant_id) === String(f.tenantId)));
+									const name = tObj ? (tObj.name || tObj.full_name || `${tObj.first_name || ''} ${tObj.last_name || ''}`.trim()) : f.tenantId;
+									return `Frequent Late: ${name} — ${f.count} overdue`;
+								})() : 'Frequent Late: N/A'}</div>
 							</div>
 						</div>
 					</div>
 				</div>
+
+                
 
 
 
@@ -795,7 +919,7 @@ const PropertyManagerDashboard = () => {
 								</div>
 								<div>
 									{(occupancySeries.length === 0) ? <div className="text-muted">No occupancy data available yet — add tenants with move-in dates.</div> : (
-										<div className="pm-modal-chart"><Line data={occupancyData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => items && items.length ? items[0].label : '', label: (ctx) => `Occupied: ${ctx.parsed.y}` } } }, scales: { x: { display: true, title: { display: true, text: 'Month' }, grid: { color: 'rgba(0,0,0,0.04)' } }, y: { display: true, title: { display: true, text: 'Occupied Units' }, grid: { color: 'rgba(0,0,0,0.06)' }, beginAtZero: true, ticks: { precision: 0 } } } }} /></div>
+										<div className="pm-modal-chart"><Line data={occupancyData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { title: (items) => items && items.length ? items[0].label : '', label: (ctx) => `Occupied: ${ctx.parsed.y}` } }, filler: { propagate: true } }, scales: { x: { display: true, title: { display: true, text: 'Month' }, grid: { color: 'rgba(0,0,0,0.04)' } }, y: { display: true, title: { display: true, text: 'Occupied Units' }, grid: { color: 'rgba(0,0,0,0.06)' }, beginAtZero: true, ticks: { precision: 0 } } } }} /></div>
 									)}
 								</div>
 							</div>
@@ -812,22 +936,43 @@ const PropertyManagerDashboard = () => {
 							</div>
 							<div className="p-3" style={{ maxHeight: '70vh', overflow: 'auto' }}>
 								<div className="mb-3">
-									<div className="text-muted small">Top Rent Contributor</div>
-									<div className="h5">{topRentContributor ? `${topRentContributor.apartment} — ₱${topRentContributor.amount.toLocaleString()}` : 'No data'}</div>
+									<div className="text-muted small">Top Tenant Payments (most recent)</div>
+									{topTenantPaymentsList.length === 0 ? <div className="text-muted">No data</div> : (
+										<div>
+											<div className="h6">Top 3 Recent Payers</div>
+											<ul>
+												{topTenantPaymentsList.slice(0,3).map(t => {
+													const tObj = (tenantsData||[]).find(x => (x.id === t.tenantId || x.tenant_id === t.tenantId || String(x.id) === String(t.tenantId) || String(x.tenant_id) === String(t.tenantId)));
+													const name = tObj ? (tObj.name || tObj.full_name || `${tObj.first_name || ''} ${tObj.last_name || ''}`.trim()) : t.tenantId;
+													return <li key={t.tenantId}>{`${name} — ₱${(t.totalPaid||0).toLocaleString()}${t.lastPaidAt ? ' — '+(new Date(t.lastPaidAt)).toLocaleDateString() : ''}`}</li>;
+												})}
+											</ul>
+											<div className="text-muted small">Full list available in payments.</div>
+										</div>
+									)}
 								</div>
 								<div className="mb-3">
-									<div className="text-muted small">Utility Recovery Rate</div>
-									<div className="h5">{utilityRecoveryPercent !== null ? `${utilityRecoveryPercent}%` : 'No data'}</div>
-								</div>
-								<div className="mb-3">
-									<div className="text-muted small">Most Overdue Tenant</div>
-									<div className="h6">{mostOverdueTenant ? `${mostOverdueTenant.tenantId} — ₱${mostOverdueTenant.amount.toLocaleString()}` : 'No data'}</div>
+									<div className="text-muted small">Most Overdue Tenants</div>
+									{mostOverdueList.length === 0 ? <div className="text-muted">No data</div> : (
+										<ul>
+											{mostOverdueList.map(m => {
+												const tObj = (tenantsData||[]).find(x => (x.id === m.tenantId || x.tenant_id === m.tenantId || String(x.id) === String(m.tenantId) || String(x.tenant_id) === String(m.tenantId)));
+												const name = tObj ? (tObj.name || tObj.full_name || `${tObj.first_name || ''} ${tObj.last_name || ''}`.trim()) : m.tenantId;
+												const types = (m.billTypes || []).join(', ');
+												return <li key={m.tenantId}>{`${name} — ₱${(m.totalOverdue||0).toLocaleString()}${types ? ' ('+types+')' : ''}`}</li>;
+											})}
+										</ul>
+									)}
 								</div>
 								<div>
 									<div className="text-muted small">Frequent Late Payers</div>
-									{frequentLatePayers.length === 0 ? <div className="text-muted">No data</div> : (
+									{frequentLatePayersList.length === 0 ? <div className="text-muted">No data</div> : (
 										<ul>
-											{frequentLatePayers.map(f => <li key={f.tenantId}>{`${f.tenantId} — ${f.count} overdue`}</li>)}
+											{frequentLatePayersList.map(f => {
+												const tObj = (tenantsData||[]).find(x => (x.id === f.tenantId || x.tenant_id === f.tenantId || String(x.id) === String(f.tenantId) || String(x.tenant_id) === String(f.tenantId)));
+												const name = tObj ? (tObj.name || tObj.full_name || `${tObj.first_name || ''} ${tObj.last_name || ''}`.trim()) : f.tenantId;
+												return <li key={f.tenantId}>{`${name} — ${f.count} overdue`}</li>;
+											})}
 										</ul>
 									)}
 								</div>

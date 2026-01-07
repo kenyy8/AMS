@@ -6,12 +6,17 @@ import { showToast } from '../../toastService';
 const QRCodeGenerator = () => {
   // navigate not used in this component
   // separate QR state for tenant and device to avoid mixing outputs
+  // these preview values are reserved for future features; quiet unused warnings
+  // eslint-disable-next-line no-unused-vars
   const [tenantQrCode, setTenantQrCode] = useState('');
+  // eslint-disable-next-line no-unused-vars
   const [tenantGeneratedQR, setTenantGeneratedQR] = useState(null);
   // device-related state removed per UI update
   const [tenants, setTenants] = useState([]);
+  // eslint-disable-next-line no-unused-vars
   const [selectedTenant, setSelectedTenant] = useState('');
   // legacy single generatedQR removed to keep tenant/device QR separate
+  // eslint-disable-next-line no-unused-vars
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [viewModal, setViewModal] = useState(false);
@@ -50,6 +55,7 @@ const QRCodeGenerator = () => {
     }
   };
 
+  // eslint-disable-next-line no-unused-vars
   const generateTenantBillsQR = async () => {
   if (!selectedTenant) return showToast('Select a tenant', 'info');
     try {

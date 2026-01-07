@@ -1,7 +1,8 @@
-import React from 'react';
-import { NavLink, useNavigate, useLocation } from 'react-router-dom';
-import '../../theme.css';
-import { showToast } from '../../toastService';
+import React, { useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+// theme styles merged into App.css
+import '../../App.css';
+// showToast unused here
 
 const navItems = [
 	{ to: '/property-manager-dashboard', label: 'Dashboard' },
@@ -16,7 +17,8 @@ const navItems = [
 
 const Navbar = () => {
 	const navigate = useNavigate();
-	const location = useLocation();
+
+	const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
 	// Previously we returned null when a `tenant` key existed in localStorage.
 	// That caused the manager navbar to disappear when the app was opened offline
@@ -72,7 +74,34 @@ const Navbar = () => {
 				</div>
 
 				<div className="d-md-none">
-					<NavLink to="/property-manager-dashboard" className="nav-pill small">Menu</NavLink>
+					{/* Mobile: open an in-place menu instead of navigating to dashboard */}
+					<button className="nav-pill small" onClick={() => setMobileMenuOpen(true)} aria-expanded={mobileMenuOpen} aria-controls="mobile-nav">Menu</button>
+					{mobileMenuOpen && (
+						<div className="mobile-nav-backdrop" role="dialog" aria-modal="true" onClick={() => setMobileMenuOpen(false)}>
+							<div className="mobile-nav-panel" id="mobile-nav" onClick={(e) => e.stopPropagation()}>
+								<div className="mobile-nav-header d-flex align-items-center justify-content-between">
+									<div className="brand-text">SMART APARTMENT</div>
+									<button className="nav-utility" onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">✕</button>
+								</div>
+								<nav className="mobile-nav-items">
+									{navItems.map(item => (
+										<NavLink
+											key={item.to}
+											to={item.to}
+											className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}
+											onClick={() => setMobileMenuOpen(false)}
+										>
+											{item.label}
+										</NavLink>
+									))}
+								</nav>
+								<div className="mobile-nav-footer d-flex gap-2">
+									<button className="nav-utility" title="Refresh" onClick={() => { setMobileMenuOpen(false); window.location.reload(); }}>Refresh</button>
+									<button className="nav-utility" title="Logout" onClick={() => { setMobileMenuOpen(false); doLogout(); }}>Logout</button>
+								</div>
+							</div>
+						</div>
+					)}
 				</div>
 			</div>
 		</header>
