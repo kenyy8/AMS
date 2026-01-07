@@ -1,11 +1,58 @@
-﻿const express = require('express');
+﻿// Load .env variables early so process.env.HOST and PORT are available
+try { require('dotenv').config(); } catch (e) { /* dotenv not available in some environments */ }
+const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(cors());
 app.use(express.json());
+
+// Host/port configuration: allow overriding via backend/.env
+const HOST = process.env.HOST || '127.0.0.1'; // set to 0.0.0.0 to accept LAN connections
+const PORT = process.env.PORT || 5001;
+
+// Detect local LAN IPv4 for logging and CORS whitelist
+function getLocalIPv4() {
+  try {
+    const os = require('os');
+    const ifaces = os.networkInterfaces();
+    for (const name in ifaces) {
+      for (const iface of ifaces[name]) {
+        if (iface && iface.family === 'IPv4' && !iface.internal) {
+          return iface.address;
+        }
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+const LOCAL_IP = getLocalIPv4();
+
+// Configure CORS to allow localhost and LAN origins (port 3000 default for CRA)
+const allowedOrigins = new Set([`http://localhost:3000`]);
+if (LOCAL_IP) allowedOrigins.add(`http://${LOCAL_IP}:3000`);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    // allow requests with no origin (e.g., server-to-server, curl)
+    if (!origin) return callback(null, true);
+    try {
+      const url = new URL(origin);
+      const hostOnly = `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ''}`;
+      if (allowedOrigins.has(hostOnly)) return callback(null, true);
+    } catch (e) {
+      // fallthrough
+    }
+    return callback(new Error('CORS policy does not allow access from the specified Origin.'), false);
+  },
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS']
+}));
 
 const db = mysql.createConnection({
   host: 'localhost',
@@ -282,7 +329,7 @@ app.post('/api/tenants', (req, res) => {
 
 app.put('/api/tenants/:id', (req, res) => {
   const { id } = req.params;
-  const { name, email, phone, apartment_id, status, tenant_id } = req.body;
+  const { name, email, phone, apartment_id, status, tenant_id, move_in_date } = req.body;
   // get current tenant state to handle apartment occupancy changes and pause/resume bills
   db.query('SELECT apartment_id, status FROM tenants WHERE id = ?', [id], (selErr, selRows) => {
     if (selErr) return res.status(500).json({ message: 'Failed to fetch tenant' });
@@ -299,10 +346,11 @@ app.put('/api/tenants/:id', (req, res) => {
       const fields = [];
       const values = [];
       if (name !== undefined) { fields.push('name = ?'); values.push(name); }
-      if (email !== undefined) { fields.push('email = ?'); values.push(email); }
+  if (email !== undefined) { fields.push('email = ?'); values.push(email); }
       if (phone !== undefined) { fields.push('phone = ?'); values.push(phone); }
       if (apartment_id !== undefined) { fields.push('apartment_id = ?'); values.push(apartment_id); }
       if (tenant_id !== undefined) { fields.push('tenant_id = ?'); values.push(tenant_id); }
+  if (move_in_date !== undefined) { fields.push('move_in_date = ?'); values.push(move_in_date); }
       if (status !== undefined) { fields.push('status = ?'); values.push(status); }
 
   if (fields.length === 0) {
@@ -1353,16 +1401,14 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'Server is running!' });
 });
 
-const PORT = process.env.PORT || 5001;
-
 // Register routes that don't depend on dynamic startup ordering
 const meterDeviceRoutes = require('./routes/meterDeviceRoutes');
 app.use('/api/meter-devices', meterDeviceRoutes);
 
 // Start server first, then perform DB setup and print concise startup logs in the requested order.
-app.listen(PORT, async () => {
-  // Start line 1
-  console.log('SMART APARTMENT server running on port ' + PORT);
+app.listen(PORT, HOST, async () => {
+  console.log('SMART APARTMENT server running on ' + HOST + ':' + PORT);
+  if (LOCAL_IP) console.log('LAN access URL: http://' + LOCAL_IP + ':' + PORT);
 
   // Line 2: indicate we're performing schema/table setup
   console.log('Ensuring required tables...');

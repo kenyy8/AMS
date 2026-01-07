@@ -15,20 +15,19 @@ exports.login = async (req, res) => {
 
 exports.create = async (req, res) => {
   try {
-    const { name, email, phone, apartment_id } = req.body;
-    const id = await Tenant.create(name, email, phone, apartment_id);
-    const tenant = await Tenant.findByTenantId(await Tenant.getNextTenantId());
-    
+    const { name, email, phone, apartment_id, move_in_date } = req.body;
+    const id = await Tenant.create(name, email, phone, apartment_id, move_in_date || null);
+    // fetch the created tenant row
+    const [rows] = await db.query('SELECT t.*, a.apartment_number FROM tenants t LEFT JOIN apartments a ON t.apartment_id = a.id WHERE t.id = ?', [id]);
+    const tenant = rows && rows[0] ? rows[0] : null;
     // Generate QR code for the tenant
     const qrData = {
-      tenant_id: tenant.tenant_id,
-      name: tenant.name,
-      apartment_id: tenant.apartment_id,
-      portal_url: \\/tenant/\\
+      tenant_id: tenant ? tenant.tenant_id : null,
+      name: tenant ? tenant.name : name,
+      apartment_id: tenant ? tenant.apartment_id : apartment_id,
+      portal_url: '/tenant/'
     };
-    
     const qrCode = await QRCode.toDataURL(JSON.stringify(qrData));
-    
     res.status(201).json({ tenant, qr_code: qrCode });
   } catch (err) {
     console.error('Error creating tenant:', err);
@@ -43,9 +42,11 @@ exports.getAll = async (req, res) => {
 
 exports.update = async (req, res) => {
   const { id } = req.params;
-  const { tenant_id, name, email, phone, apartment_id } = req.body;
-  await Tenant.update(id, tenant_id, name, email, phone, apartment_id);
-  res.json({ message: 'Tenant updated' });
+  const { tenant_id, name, email, phone, apartment_id, move_in_date } = req.body;
+  await Tenant.update(id, tenant_id, name, email, phone, apartment_id, move_in_date);
+  // return updated row
+  const [rows] = await db.query('SELECT t.*, a.apartment_number FROM tenants t LEFT JOIN apartments a ON t.apartment_id = a.id WHERE t.id = ?', [id]);
+  res.json(rows && rows[0] ? rows[0] : { message: 'Tenant updated' });
 };
 
 exports.delete = async (req, res) => {
@@ -96,7 +97,7 @@ exports.generateQRCode = async (req, res) => {
       tenant_id: tenant.tenant_id,
       name: tenant.name,
       apartment_id: tenant.apartment_id,
-      portal_url: \\/tenant/\\
+      portal_url: '/tenant/'
     };
     
     const qrCode = await QRCode.toDataURL(JSON.stringify(qrData));

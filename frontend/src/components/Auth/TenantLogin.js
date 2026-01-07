@@ -51,6 +51,7 @@ const TenantLogin = () => {
                 setError('');
                 try {
                   const res = await axios.post('/api/tenants/login', { email, password });
+                  console.log('Tenant login success', res.data);
                   if (res.data && res.data.token) {
                     localStorage.setItem('token', res.data.token);
                     localStorage.setItem('tenant', JSON.stringify(res.data.user));

@@ -32,6 +32,8 @@ const TenantManagement = () => {
         ]);
         setTenants(tRes.data);
         setApartments(aRes.data);
+  // keep a copy of tenants for move-in date charting if needed
+        
       } catch (e) {
         console.error('Failed to load tenant data', e);
       } finally {
@@ -145,7 +147,7 @@ const TenantManagement = () => {
 
       // notify other components (cross-tab) to refresh
       try { localStorage.setItem('apartmentsUpdated', Date.now().toString()); } catch (e) {}
-      setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '' });
+  setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '', move_in_date: '' });
           // close modal and notify user
           setShowModal(false);
           setSelectedTenantId(null);
@@ -242,7 +244,7 @@ const TenantManagement = () => {
               <div>All Tenants</div>
               {/* Toolbar */}
               <div>
-                <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => { setModalMode('create'); setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '' }); setShowModal(true); }}>+ Add Tenant</button>
+                <button className="btn btn-sm btn-outline-secondary me-2" onClick={() => { setModalMode('create'); setTenantForm({ name: '', email: '', phone: '', apartment_id: '', tenant_id: '', password: '', move_in_date: (new Date()).toISOString().split('T')[0] }); setShowModal(true); }}>+ Add Tenant</button>
                 {/* Removed global Edit button; per-row edit buttons added to each row for clarity */}
                 <button className="btn btn-sm btn-outline-warning me-2" onClick={async () => {
                   if (selectedTenantIds.length === 0) return showToast('Select one or more tenants to Pause/Activate', 'error');
@@ -323,6 +325,7 @@ const TenantManagement = () => {
                         <th>Email</th>
                         <th>Phone</th>
                         <th>Apartment</th>
+                        <th>Move-In Date</th>
                         <th>Status</th>
                       </tr>
                     </thead>
@@ -356,6 +359,7 @@ const TenantManagement = () => {
                             <td>{tenant.email}</td>
                             <td>{tenant.phone}</td>
                             <td>{tenant.apartment_number || 'Not assigned'}</td>
+                            <td>{tenant.move_in_date ? (new Date(tenant.move_in_date)).toLocaleDateString() : '-'}</td>
                             <td style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                               <span className={"badge " + (isPaused ? 'bg-warning text-dark' : tenant.status === 'active' ? 'bg-success' : 'bg-secondary')}>
                                 {isPaused ? 'paused' : tenant.status}
@@ -416,6 +420,16 @@ const TenantManagement = () => {
         onChange={e => setTenantForm(prev => ({ ...prev, name: e.target.value }))}
                     required 
         readOnly={modalMode === 'view'}
+                  />
+                </div>
+                <div className="mb-3">
+                  <label className="form-label">Move-In Date</label>
+                  <input
+                    type="date"
+                    className="form-control"
+                    value={tenantForm.move_in_date || ''}
+                    onChange={e => setTenantForm(prev => ({ ...prev, move_in_date: e.target.value }))}
+                    readOnly={modalMode === 'view'}
                   />
                 </div>
                 <div className="mb-3">

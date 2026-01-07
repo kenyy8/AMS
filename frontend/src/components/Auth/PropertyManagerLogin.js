@@ -14,12 +14,14 @@ const PropertyManagerLogin = () => {
     e.preventDefault();
     setError('');
     try {
-      const res = await axios.post('/api/property-managers/login', { email, password });
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
-      navigate('/property-manager-dashboard');
+  const res = await axios.post('/api/property-managers/login', { email, password });
+  console.log('Property manager login success', res.data);
+  localStorage.setItem('token', res.data.token);
+  localStorage.setItem('user', JSON.stringify(res.data.user));
+  navigate('/property-manager-dashboard');
     } catch (err) {
-      setError(err.response?.data?.message || 'Login failed');
+  console.error('Property manager login error', err);
+  setError(err.response?.data?.message || 'Login failed');
     }
   };
 

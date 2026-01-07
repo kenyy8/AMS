@@ -13,6 +13,7 @@ import QRCodeGenerator from "./components/Dashboard/QRCodeGenerator";
 import QRReader from "./components/Dashboard/QRReader";
 import Reports from "./components/Dashboard/NotificationCenter";
 import Layout from './components/Layout/Layout';
+import ApiTest from './pages/ApiTest';
 
 const AppRoutes = () => (
   <Routes>
@@ -32,6 +33,7 @@ const AppRoutes = () => (
   <Route path="/qr-scanner" element={<QRReader />} />
       <Route path="/reports" element={<Reports />} />
   <Route path="/qr-codes" element={<QRCodeGenerator />} />
+  <Route path="/api-test" element={<ApiTest />} />
     </Route>
   </Routes>
 );
