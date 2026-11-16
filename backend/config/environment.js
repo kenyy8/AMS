@@ -20,6 +20,7 @@ function validateProduction() {
   requireSecrets();
   if (!process.env.DEMO_PASSWORD_SEED || process.env.DEMO_PASSWORD_SEED.length < 32) throw new Error('DEMO_PASSWORD_SEED must be a private random secret of at least 32 characters.');
   if (new Set([process.env.JWT_SECRET,process.env.QR_SECRET,process.env.DEMO_PASSWORD_SEED]).size !== 3) throw new Error('Use three distinct production secrets.');
+  for(const role of ['manager','tenant'])require('../services/demoAccounts').hostedPassword(role);
   publicOrigin();
 }
 function databasePath() {

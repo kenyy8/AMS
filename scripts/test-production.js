@@ -13,6 +13,9 @@ const jwt=require('../backend/node_modules/jsonwebtoken');
 const root=path.resolve(__dirname,'..');
 const directory=fs.mkdtempSync(path.join(os.tmpdir(),'ams-production-test-'));
 const secrets=Object.fromEntries(['JWT_SECRET','QR_SECRET','DEMO_PASSWORD_SEED'].map(k=>[k,crypto.randomBytes(48).toString('base64url')]));
+// Explicit private inputs may exercise deployment credentials. Fallbacks are
+// disposable test fixtures only and never configure the application instance.
+for(const key of ['HOSTED_MANAGER_PASSWORD','HOSTED_TENANT_PASSWORD'])secrets[key]=process.env[key]||crypto.randomBytes(10).toString('hex').slice(0,13);
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function port(){return new Promise(resolve=>{const server=net.createServer();server.listen(0,'127.0.0.1',()=>{const result=server.address().port;server.close(()=>resolve(result));});});}
 async function stop(child){if(child && child.exitCode===null)await new Promise((resolve,reject)=>killTree(child.pid,'SIGTERM',error=>error?reject(error):resolve()));}
@@ -20,16 +23,15 @@ async function instance(name,overrides={}){
   const p=await port(),origin='http://127.0.0.1:'+p;
   const env={...process.env,...secrets,NODE_ENV:'production',HOSTED_DEMO:'true',PORT:String(p),APP_ORIGIN:origin,SQLITE_PATH:path.join(directory,name,'ams.db')};
   delete env.RENDER;delete env.RENDER_EXTERNAL_URL;delete env.DEMO_MANIFEST_PATH;
-  delete env.HOSTED_MANAGER_PASSWORD;delete env.HOSTED_TENANT_PASSWORD;
   Object.assign(env,overrides);
   const child=spawn(process.execPath,['--max-old-space-size=256',path.join(root,'scripts/start-production.js')],{cwd:os.tmpdir(),env,stdio:['ignore','pipe','pipe'],windowsHide:true});
   let logs='';for(const stream of [child.stdout,child.stderr])stream.on('data',s=>{logs=(logs+s).slice(-8000);});
   const end=Date.now()+60000;
-    while(Date.now()<end){if(child.exitCode!==null)throw new Error('Production startup failed: '+logs);try{if((await fetch(origin+'/api/health')).ok)return{child,env,origin,profiles:accounts({passwordSeed:secrets.DEMO_PASSWORD_SEED,origin,hosted:true})};}catch(_){}await delay(200);}
+    while(Date.now()<end){if(child.exitCode!==null)throw new Error('Production startup failed: '+logs);try{if((await fetch(origin+'/api/health')).ok)return{child,env,origin,profiles:accounts({passwordSeed:secrets.DEMO_PASSWORD_SEED,origin,hosted:true,environment:env})};}catch(_){}await delay(200);}
   await stop(child);throw new Error('Production startup timed out: '+logs);
 }
 async function main(){
-  const first=await instance('first');let browser,second,proxy;
+  const first=await instance('first');let browser,second,proxy,restarted;
   async function request(method,route,body,token,status=200,headers={}){
     const r=await fetch(first.origin+route,{method,headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(token?{Authorization:'Bearer '+token}:{}),...headers},body:body===undefined?undefined:JSON.stringify(body)});
     assert.equal(r.status,status,`${method} ${route} returned ${r.status}`);
@@ -49,6 +51,7 @@ async function main(){
     const m=await request('POST',manager.login_route,{email:manager.email,password:manager.temporary_password});
     const t=await request('POST',tenant.login_route,{email:tenant.email,password:tenant.temporary_password});
     assert.equal(m.user.role,'manager');assert.equal(t.user.role,'tenant');assert.ok(t.user.apartment_id);
+    const unrelated=read.prepare('SELECT * FROM tenants WHERE id<>? ORDER BY id').all(t.user.id);
     await request('POST',manager.login_route,{email:manager.email,password:'invalid-test-password'},undefined,401);
     await request('POST',tenant.login_route,{email:tenant.email,password:'invalid-test-password'},undefined,401);
     await request('GET','/api/tenants',undefined,undefined,401);
@@ -95,9 +98,20 @@ async function main(){
     assert.equal(read.prepare('SELECT COUNT(*) AS n FROM property_managers').get().n,1);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM tenants').get().n,15);
     const bcrypt=require('../backend/node_modules/bcryptjs');
     for(const [table,profile,id] of [['property_managers',manager,m.user.id],['tenants',tenant,t.user.id]]){const row=read.prepare('SELECT * FROM '+table+' WHERE id=?').get(id);assert.equal(row.email,profile.email);assert.ok(bcrypt.compareSync(profile.temporary_password,row.password));}
-    const writer2=new DatabaseSync(first.env.SQLITE_PATH);writer2.prepare("UPDATE property_managers SET password='wrong-preferred-fixture' WHERE id=?").run(m.user.id);writer2.close();
-    const repairPreferred=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repairPreferred.status,0,repairPreferred.stderr);assert.ok(bcrypt.compareSync(manager.temporary_password,read.prepare('SELECT password FROM property_managers WHERE id=?').get(m.user.id).password));assert.equal(read.prepare('SELECT COUNT(*) AS n FROM payment_history').get().n,224);read.close();
+    const writer2=new DatabaseSync(first.env.SQLITE_PATH);
+    for(const [table,recordId]of [['property_managers',m.user.id],['tenants',t.user.id]])writer2.prepare('UPDATE '+table+' SET password=? WHERE id=?').run(bcrypt.hashSync(crypto.randomBytes(18).toString('hex'),12),recordId);
+    writer2.close();
+    const beforeSync=Object.fromEntries(['apartments','bills','payment_history','meter_devices','meter_history'].map(table=>[table,read.prepare('SELECT * FROM '+table+' ORDER BY id').all()]));
+    const repairPreferred=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repairPreferred.status,0,repairPreferred.stderr);
+    for(const [table,account,recordId]of [['property_managers',manager,m.user.id],['tenants',tenant,t.user.id]])assert.ok(bcrypt.compareSync(account.temporary_password,read.prepare('SELECT password FROM '+table+' WHERE id=?').get(recordId).password));
+    assert.equal(read.prepare('SELECT COUNT(*) AS n FROM payment_history').get().n,224);
+    assert.deepEqual(read.prepare('SELECT * FROM tenants WHERE id<>? ORDER BY id').all(t.user.id),unrelated,'Other 14 tenant accounts must remain unchanged');
+    for(const [table,rows]of Object.entries(beforeSync))assert.deepEqual(read.prepare('SELECT * FROM '+table+' ORDER BY id').all(),rows,table+' must remain unchanged');read.close();
     console.log('[production-test] Legacy hosted identities upgraded in place, preferred credentials repaired, and account IDs/billing history preserved without duplicates.');
+    restarted=await instance('first');
+    for(const account of [manager,tenant]){const r=await fetch(restarted.origin+account.login_route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:account.email,password:account.temporary_password})});assert.equal(r.status,200);}
+    const persisted=new DatabaseSync(restarted.env.SQLITE_PATH,{readOnly:true});assert.equal(persisted.prepare('SELECT COUNT(*) AS n FROM apartments').get().n,21);assert.equal(persisted.prepare('SELECT COUNT(*) AS n FROM bills').get().n,270);assert.deepEqual(persisted.prepare('SELECT * FROM tenants WHERE id<>? ORDER BY id').all(t.user.id),unrelated);persisted.close();await stop(restarted.child);
+    console.log('[production-test] Actual same-file application restart preserves SQLite edits and both configured passwords; all 14 other tenants remain unchanged.');
     second=await instance('fresh-ephemeral-filesystem');
     const response=await fetch(second.origin+manager.login_route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:manager.email,password:manager.temporary_password})});assert.equal(response.status,200);
     const tenantRestart=await fetch(second.origin+tenant.login_route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:tenant.email,password:tenant.temporary_password})});assert.equal(tenantRestart.status,200);
@@ -105,11 +119,12 @@ async function main(){
     console.log('[production-test] Repeated initialization adds no duplicates; a fresh filesystem restores the demo with stable credentials and discards temporary edits.');
     const unsafe={...first.env,SQLITE_PATH:path.join(root,'backend/data/ams.db')};const failure=spawnSync(process.execPath,[path.join(root,'scripts/start-production.js')],{env:unsafe,encoding:'utf8',timeout:10000});assert.notEqual(failure.status,0);assert.ok(failure.stderr.includes('temporary'));
     const absent={...first.env,JWT_SECRET:''};const missing=spawnSync(process.execPath,[path.join(root,'scripts/start-production.js')],{env:absent,encoding:'utf8',timeout:10000});assert.notEqual(missing.status,0);
+    for(const key of ['HOSTED_MANAGER_PASSWORD','HOSTED_TENANT_PASSWORD']){const invalid=spawnSync(process.execPath,[path.join(root,'scripts/start-production.js')],{env:{...first.env,[key]:''},encoding:'utf8',timeout:10000});assert.notEqual(invalid.status,0);assert.ok(invalid.stderr.includes(key));}
     console.log('[production-test] Unsafe local DB targets and missing environment secrets fail closed. PASS (local simulation; no public deployment).');
     proxy=await instance('render-proxy',{RENDER:'true',APP_ORIGIN:'https://demo-class.example.invalid'});
     const redirect=await fetch(proxy.origin+'/reports',{redirect:'manual'});assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),'https://demo-class.example.invalid/reports');
     const forwarded=await fetch(proxy.origin+'/reports',{headers:{'X-Forwarded-Proto':'https',Accept:'text/html'}});assert.equal(forwarded.status,200);assert.ok(forwarded.headers.get('strict-transport-security'));assert.ok(forwarded.headers.get('content-security-policy').includes('upgrade-insecure-requests'));
     console.log('[production-test] Render proxy HTTPS redirect and forwarded-HTTPS security headers passed (proxy simulation).');
-  }finally{if(browser)await browser.close();await stop(first.child);if(second)await stop(second.child);if(proxy)await stop(proxy.child);}
+  }finally{if(browser)await browser.close();await stop(first.child);if(second)await stop(second.child);if(proxy)await stop(proxy.child);if(restarted)await stop(restarted.child);}
 }
 main().catch(error=>{console.error('[production-test] FAILED: '+error.message);process.exitCode=1;});

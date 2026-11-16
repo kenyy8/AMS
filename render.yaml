@@ -20,3 +20,7 @@ services:
         generateValue: true
       - key: DEMO_PASSWORD_SEED
         sync: false
+      - key: HOSTED_MANAGER_PASSWORD
+        sync: false
+      - key: HOSTED_TENANT_PASSWORD
+        sync: false
