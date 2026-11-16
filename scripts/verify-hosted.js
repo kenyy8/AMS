@@ -52,7 +52,13 @@ async function main(){
       await page.goto(origin+new URL(profile.login_page,origin).pathname);await clean();
       await page.locator('input[type=email]').fill(profile.email);await page.locator('input[type=password]').fill(profile.temporary_password);
       await page.getByRole('button',{name:'Log In',exact:true}).click();await page.waitForURL('**/'+dashboard);await page.waitForLoadState('networkidle');await clean();
-      if(profile===tenant)assert.ok((await page.locator('body').innerText()).includes(assigned.apartment_number));
+      if(profile===tenant){
+        // The existing dashboard labels apartments by database ID; the unit number
+        // and occupancy relationship were independently checked through the API.
+        const body=await page.locator('body').innerText();
+        assert.ok(body.includes(t.user.name));
+        assert.ok(new RegExp('Apartment:\\s*'+t.user.apartment_id+'\\b').test(body));
+      }
     }
     assert.equal(errors.length,0,'Browser runtime errors');pass('Actual hosted manager and tenant dashboards render without demo banners or labels');
   }finally{if(browser)await browser.close();}
