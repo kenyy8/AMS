@@ -7,12 +7,19 @@ const secretsFile=path.join(root,'backend/data/render-secrets.local.json');
 const output=path.join(root,'render-demo-accounts.local.csv');
 function writeManifest(seed) {
   if(typeof seed!=='string'||seed.length<32)throw new Error('A private DEMO_PASSWORD_SEED of at least 32 characters is required.');
-  const profiles=accounts({passwordSeed:seed,origin:process.env.DEMO_LOGIN_ORIGIN || ''});
+  const profiles=accounts({passwordSeed:seed,origin:process.env.DEMO_LOGIN_ORIGIN || '',hosted:true});
   if(fs.existsSync(output)) {
     const old=readAccounts(output);
-    if(old.length!==profiles.length || old.some((row,i)=>row.email!==profiles[i].email || row.temporary_password!==profiles[i].temporary_password)) throw new Error('A hosted credential manifest with different credentials already exists. Preserve it privately before deriving a replacement.');
+    const matches=expected=>old.length===expected.length && old.every((row,i)=>row.email===expected[i].email && row.temporary_password===expected[i].temporary_password);
+    if(!matches(profiles)) {
+      if(!matches(accounts({passwordSeed:seed,origin:''})))throw new Error('The existing manifest has unrelated credentials; preserve it privately before replacement.');
+      const backup=path.join(root,'backend/data','render-accounts-before-preferred-'+Date.now()+'.local.csv');
+      writePrivate(backup,fs.readFileSync(output,'utf8'),true);
+      console.log('[render] Previous hosted credentials preserved privately in '+backup);
+    }
   }
   writePrivate(output,csv(profiles));
+  writePrivate(path.join(root,'backend/data/hosted-accounts.local.json'),JSON.stringify({HOSTED_MANAGER_PASSWORD:profiles[0].temporary_password,HOSTED_TENANT_PASSWORD:profiles[1].temporary_password},null,2)+'\n');
   console.log('[render] Hosted demo credentials saved privately to '+output+'. No passwords were printed.');
 }
 async function main() {

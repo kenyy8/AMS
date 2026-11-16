@@ -38,6 +38,7 @@ async function main({keepOpen=false} = {}) {
     const existing=db.get('SELECT * FROM demo_seed_runs WHERE seed_key=?',[SEED_KEY]);
     if(hosted && existing) {
       if(JSON.parse(existing.metadata_json).hosted!==true) throw new Error('Refusing to host a database that was not created as a fresh hosted demo.');
+      require('../services/hostedAccounts').reconcileHostedAccounts(db);
       console.log('[demo] Hosted fictional database already initialized; no duplicate records added.');
       return;
     }
@@ -61,29 +62,29 @@ async function main({keepOpen=false} = {}) {
       console.log('[demo] Existing dataset verified. No business records or passwords were inserted, overwritten, or duplicated.');
     } else {
       if(!hosted && fs.existsSync(manifestPath))throw new Error('A credential manifest already exists without this seed ledger. It was not overwritten.');
-      accounts=hosted?makeAccounts({passwordSeed:process.env.DEMO_PASSWORD_SEED,origin:publicOrigin()}):(fs.existsSync(stage)?readAccounts(stage):makeAccounts());
+      accounts=hosted?makeAccounts({passwordSeed:process.env.DEMO_PASSWORD_SEED,origin:publicOrigin(),hosted:true}):(fs.existsSync(stage)?readAccounts(stage):makeAccounts());
       assert.equal(accounts.length,16);
-      assert.equal(accounts[0].email,managerEmail);
-      accounts.slice(1).forEach((a,i)=>assert.equal(a.email,email(i)));
+      assert.equal(accounts[0].email,hosted?'admin@ams.test':managerEmail);
+      accounts.slice(1).forEach((a,i)=>assert.equal(a.email,hosted&&i===0?'tenant@ams.test':email(i)));
       if(!hosted && !fs.existsSync(stage))writePrivate(stage,csv(accounts),true);
       const hashes=accounts.map(a=>bcrypt.hashSync(a.temporary_password,12));
       db.transaction(()=>{
         const preserved=snapshot(db);
-        if(db.get('SELECT id FROM property_managers WHERE email=?',[managerEmail]))throw new Error('Demo manager identifier collides with an existing account.');
+        if(db.get('SELECT id FROM property_managers WHERE email=?',[accounts[0].email]))throw new Error('Demo manager identifier collides with an existing account.');
         for(let i=0;i<20;i++)if(db.get('SELECT id FROM apartments WHERE apartment_number=?',[unitName(i)]))throw new Error('Demo unit identifier collides with an existing record.');
         for(let i=0;i<15;i++)if(db.get('SELECT id FROM tenants WHERE email=? OR tenant_id=?',[email(i),`DEMO-APT-${String(i+1).padStart(4,'0')}`]))throw new Error('Demo tenant identifier collides with an existing account.');
         const property={name:'DEMO Amihan Courtyard',location:'Fictional Sample Lane, Quezon City, Metro Manila',building:'DEMO Amihan Courtyard - Quezon City',currency:'PHP',period_start:date(months[0].year,months[0].month,1),period_end:date(year,month-1,day),electricity_rate:12.5,water_rate:45,rates_are_fictional:true};
         db.run('INSERT INTO demo_seed_runs(seed_key,as_of,metadata_json) VALUES (?,?,?)',[SEED_KEY,asOf,JSON.stringify({property,preserved,hosted})]);
         const track=(table,recordId,key)=>{db.run('INSERT INTO demo_seed_records(seed_key,table_name,record_id,logical_key) VALUES (?,?,?,?)',[SEED_KEY,table,recordId,key]);return recordId;};
         let managerId;
-        if(db.get('SELECT COUNT(*) AS n FROM property_managers').n===0)managerId=require('../services/managerBootstrap').bootstrapManager(db,{name:accounts[0].display_name,email:managerEmail,password:accounts[0].temporary_password}).id;
-        else managerId=db.run("INSERT INTO property_managers(name,email,password,role) VALUES (?,?,?,'manager')",[accounts[0].display_name,managerEmail,hashes[0]]).insertId;
+        if(db.get('SELECT COUNT(*) AS n FROM property_managers').n===0)managerId=require('../services/managerBootstrap').bootstrapManager(db,{name:accounts[0].display_name,email:accounts[0].email,password:accounts[0].temporary_password}).id;
+        else managerId=db.run("INSERT INTO property_managers(name,email,password,role) VALUES (?,?,?,'manager')",[accounts[0].display_name,accounts[0].email,hashes[0]]).insertId;
         track('property_managers',managerId,'manager');
         const apartmentIds=[];
         for(let i=0;i<20;i++)apartmentIds.push(track('apartments',db.run('INSERT INTO apartments(apartment_number,floor,building,rent_amount,status,created_at) VALUES (?,?,?,?,?,?)',[unitName(i),String(Math.floor(i/5)+1),property.building,specifications[i][1],i<15?'occupied':'available',timestamp(date(months[0].year,months[0].month-2,1))]).insertId,`unit-${i+1}`));
         for(let i=0;i<15;i++){
           const moveIn=date(months[0].year,months[0].month-1,1+i%8);
-          const tenantId=track('tenants',db.run("INSERT INTO tenants(tenant_id,name,email,phone,password,apartment_id,status,move_in_date,created_at) VALUES (?,?,?,?,?,?,'active',?,?)",[`DEMO-APT-${String(i+1).padStart(4,'0')}`,accounts[i+1].display_name,email(i),`+63 900 000 ${String(101+i).padStart(4,'0')}`,hashes[i+1],apartmentIds[i],moveIn,timestamp(moveIn)]).insertId,`tenant-${i+1}`);
+          const tenantId=track('tenants',db.run("INSERT INTO tenants(tenant_id,name,email,phone,password,apartment_id,status,move_in_date,created_at) VALUES (?,?,?,?,?,?,'active',?,?)",[`DEMO-APT-${String(i+1).padStart(4,'0')}`,accounts[i+1].display_name,accounts[i+1].email,`+63 900 000 ${String(101+i).padStart(4,'0')}`,hashes[i+1],apartmentIds[i],moveIn,timestamp(moveIn)]).insertId,`tenant-${i+1}`);
           const createBill=(type,amount,due,created,paid,paidAt,key)=>{
             const billId=track('bills',db.run('INSERT INTO bills(tenant_id,bill_type,amount,due_date,status,paid_at,created_at) VALUES (?,?,?,?,?,?,?)',[tenantId,type,amount,due,paid?'paid':'pending',paid?paidAt:null,created]).insertId,key);
             if(paid)track('payment_history',db.run('INSERT INTO payment_history(bill_id,amount_paid,paid_at,payment_type,created_at) VALUES (?,?,?,?,?)',[billId,amount,paidAt,type==='rent'?'RENT':'UTILITY',timestamp(paidAt.slice(0,10))]).insertId,`payment-${key}`);
@@ -118,7 +119,7 @@ async function main({keepOpen=false} = {}) {
       if(!hosted){fs.linkSync(stage,manifestPath);fs.unlinkSync(stage);}
       console.log('[demo] Fictional property, accounts, bills, payments, and readings committed successfully.');
     }
-    if(hosted){console.log('[demo] Fictional hosted seed ready. Credentials are derived privately from Render environment secrets; no manifest was written.');return;}
+    if(hosted){require('../services/hostedAccounts').reconcileHostedAccounts(db);console.log('[demo] Fictional hosted seed ready. Credentials are derived privately from Render environment secrets; no manifest was written.');return;}
     // Refresh private, expiring QR assets using the same issuer as the authenticated API.
     for(const tenant of db.all("SELECT t.id,t.tenant_id FROM tenants t JOIN demo_seed_records d ON d.record_id=t.id AND d.table_name='tenants' AND d.seed_key=?",[SEED_KEY])){
       const token=require('../services/tenantQr').createTenantToken(tenant.id);

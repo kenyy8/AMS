@@ -25,6 +25,7 @@
     "render:secrets": "node scripts/render-secrets.js",
     "render:accounts": "node scripts/render-accounts.js",
     "test:production": "node scripts/test-production.js",
+    "verify:hosted": "node scripts/verify-hosted.js",
     "check:deploy": "node scripts/assert-deploy-safe.js"
   },
   "devDependencies": {

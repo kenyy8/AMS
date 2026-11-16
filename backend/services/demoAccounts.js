@@ -4,9 +4,21 @@ const specifications=[['Studio',6500],['Studio',7000],['1BR',9500],['Studio',750
 const unitName=i=>`DEMO-${Math.floor(i/5)+1}0${i%5+1} (${specifications[i][0]})`;
 const email=i=>`tenant${String(i+1).padStart(2,'0')}@example.com`;
 const managerEmail='ams.demo.manager@example.com';
-function accounts({ passwordSeed, origin = 'http://localhost:3000' } = {}) {
+const hostedManagerEmail='admin@ams.test',hostedTenantEmail='tenant@ams.test';
+function memorablePassword(seed,role,email) {
+  const bytes=crypto.createHmac('sha256',seed).update('ams-hosted-preferred-v1:'+role+':'+email).digest();
+  const consonants='bcdfghjklmnprstv',vowels='aeio';
+  const words=Array.from({length:3},(_,word)=>Array.from({length:4},(_,pair)=>{const value=bytes[word*4+pair];return consonants[value&15]+vowels[(value>>4)&3];}).join('')).map(word=>word[0].toUpperCase()+word.slice(1));
+  return words.join('-')+'-'+String(bytes.readUInt16BE(12)%10000).padStart(4,'0')+'!';
+}
+function accounts({ passwordSeed, origin = 'http://localhost:3000',hosted=false } = {}) {
   const profiles=[{role:'manager',display_name:'Demo Celina Amihan',email:managerEmail,unit:'All demo units'},...names.map((name,i)=>({role:'tenant',display_name:'Demo '+name,email:email(i),unit:unitName(i)}))];
   if (passwordSeed !== undefined && passwordSeed.length < 32) throw new Error('Use a random demo credential seed of at least 32 characters.');
-  return profiles.map(a=>({...a,temporary_password:passwordSeed ? 'D'+crypto.createHmac('sha256',passwordSeed).update('ams-hosted-credentials-v1:'+a.role+':'+a.email).digest('base64url').slice(0,31) : crypto.randomBytes(18).toString('base64url'),login_page:origin+(a.role==='manager'?'/property-manager-login':'/tenant-login'),login_route:a.role==='manager'?'/api/property-managers/login':'/api/tenants/login',dataset:'ams-amihan-fictional-demo-v1'}));
+  if(hosted){if(!passwordSeed)throw new Error('Hosted credentials require the private seed.');profiles[0].email=hostedManagerEmail;profiles[1].email=hostedTenantEmail;for(const a of profiles){a.display_name=a.display_name.replace(/^Demo /,'');a.unit=a.unit==='All demo units'?'All apartments':a.unit.replace(/^DEMO-/,'');}}
+  return profiles.map((a,i)=>{
+    let password=passwordSeed?'D'+crypto.createHmac('sha256',passwordSeed).update('ams-hosted-credentials-v1:'+a.role+':'+a.email).digest('base64url').slice(0,31):crypto.randomBytes(18).toString('base64url');
+    if(hosted&&i<2){const key=i===0?'HOSTED_MANAGER_PASSWORD':'HOSTED_TENANT_PASSWORD';password=process.env[key]||memorablePassword(passwordSeed,a.role,a.email);if(password.length<16||Buffer.byteLength(password)>72)throw new Error(key+' must contain 16 or more characters and at most 72 UTF-8 bytes.');}
+    return {...a,temporary_password:password,login_page:origin+(a.role==='manager'?'/property-manager-login':'/tenant-login'),login_route:a.role==='manager'?'/api/property-managers/login':'/api/tenants/login',dataset:'ams-amihan-fictional-demo-v1'};
+  });
 }
-module.exports = { names,specifications,unitName,email,managerEmail,accounts };
+module.exports = { names,specifications,unitName,email,managerEmail,hostedManagerEmail,hostedTenantEmail,accounts,memorablePassword };

@@ -3,7 +3,6 @@ import AppRoutes from './routes';
 import { BrowserRouter as Router, useLocation } from 'react-router-dom';
 import './App.css';
 import bgImage from './AMSBG.jpg';
-import DemoBanner from './components/Shared/DemoBanner';
 
 function RouteWatcher({ children }) {
   // watches location and toggles a body class for auth pages
@@ -32,9 +31,8 @@ function App() {
     return (
       <Router>
         <RouteWatcher>
-          <div className="app-root" style={process.env.REACT_APP_HOSTED_DEMO === 'true' ? { paddingBottom: 76 } : undefined}>
+          <div className="app-root">
             <AppRoutes />
-            <DemoBanner />
           </div>
         </RouteWatcher>
       </Router>

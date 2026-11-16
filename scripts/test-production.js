@@ -20,11 +20,12 @@ async function instance(name,overrides={}){
   const p=await port(),origin='http://127.0.0.1:'+p;
   const env={...process.env,...secrets,NODE_ENV:'production',HOSTED_DEMO:'true',PORT:String(p),APP_ORIGIN:origin,SQLITE_PATH:path.join(directory,name,'ams.db')};
   delete env.RENDER;delete env.RENDER_EXTERNAL_URL;delete env.DEMO_MANIFEST_PATH;
+  delete env.HOSTED_MANAGER_PASSWORD;delete env.HOSTED_TENANT_PASSWORD;
   Object.assign(env,overrides);
   const child=spawn(process.execPath,['--max-old-space-size=256',path.join(root,'scripts/start-production.js')],{cwd:os.tmpdir(),env,stdio:['ignore','pipe','pipe'],windowsHide:true});
   let logs='';for(const stream of [child.stdout,child.stderr])stream.on('data',s=>{logs=(logs+s).slice(-8000);});
   const end=Date.now()+60000;
-  while(Date.now()<end){if(child.exitCode!==null)throw new Error('Production startup failed: '+logs);try{if((await fetch(origin+'/api/health')).ok)return{child,env,origin,profiles:accounts({passwordSeed:secrets.DEMO_PASSWORD_SEED,origin})};}catch(_){}await delay(200);}
+    while(Date.now()<end){if(child.exitCode!==null)throw new Error('Production startup failed: '+logs);try{if((await fetch(origin+'/api/health')).ok)return{child,env,origin,profiles:accounts({passwordSeed:secrets.DEMO_PASSWORD_SEED,origin,hosted:true})};}catch(_){}await delay(200);}
   await stop(child);throw new Error('Production startup timed out: '+logs);
 }
 async function main(){
@@ -43,12 +44,18 @@ async function main(){
     assert.equal(read.prepare('PRAGMA integrity_check').get().integrity_check,'ok');assert.equal(read.prepare('PRAGMA foreign_key_check').all().length,0);
     console.log('[production-test] Fresh hosted seed: 20 units, 15 tenants, 270 bills, integrity and foreign keys passed.');
     const manager=first.profiles[0],tenant=first.profiles[1];
+    assert.equal(manager.email,'admin@ams.test');assert.equal(tenant.email,'tenant@ams.test');
+    assert.equal(read.prepare("SELECT COUNT(*) AS n FROM apartments WHERE apartment_number LIKE 'DEMO-%' OR building LIKE 'DEMO %'").get().n,0);
     const m=await request('POST',manager.login_route,{email:manager.email,password:manager.temporary_password});
     const t=await request('POST',tenant.login_route,{email:tenant.email,password:tenant.temporary_password});
+    assert.equal(m.user.role,'manager');assert.equal(t.user.role,'tenant');assert.ok(t.user.apartment_id);
+    await request('POST',manager.login_route,{email:manager.email,password:'invalid-test-password'},undefined,401);
+    await request('POST',tenant.login_route,{email:tenant.email,password:'invalid-test-password'},undefined,401);
     await request('GET','/api/tenants',undefined,undefined,401);
     for(const route of ['/api/tenants','/api/apartments','/api/reports/overview','/api/meter-devices/settings/rates','/api/qr-tokens/1'])await request('GET',route,undefined,t.token,403);
     for(const [method,route,body]of [['POST','/api/bills/pay',{bill_ids:[1]}],['PUT','/api/apartments/1',{rent_amount:1}],['DELETE','/api/tenants/1',undefined]])await request(method,route,body,t.token,403);
     const own=await request('GET','/api/bills?tenantId=99999',undefined,t.token);assert.equal(own.length,18);assert.ok(own.every(b=>b.tenant_id===t.user.id));
+    const history=await request('GET','/api/payment-history?tenantId=99999',undefined,t.token);assert.ok(history.length>0);assert.ok(history.every(p=>p.tenant_id===t.user.id));
     const forged=jwt.sign({id:999999,role:'manager'},secrets.JWT_SECRET,{expiresIn:'1h'});await request('GET','/api/tenants',undefined,forged,401);
     await request('POST',manager.login_route,{email:manager.email,password:manager.temporary_password},undefined,403,{Origin:'https://untrusted.invalid'});
     for(const route of ['/api/test','/api/setup/status','/api/setup/manager'])await request(route.endsWith('manager')?'POST':'GET',route,route.endsWith('manager')?{}:undefined,undefined,404);
@@ -63,13 +70,15 @@ async function main(){
     console.log('[production-test] SPA deep links, API JSON 404, private-file blocking, no source maps, and secret-free frontend artifacts passed.');
     browser=await chromium.launch({channel:'chrome',headless:true});const page=await browser.newPage();const errors=[],wrongOrigin=[];
     page.on('pageerror',e=>errors.push(e.message));page.on('request',req=>{const value=req.url();if(/^https?:/.test(value)&&new URL(value).origin!==first.origin)wrongOrigin.push(value);});
-    await page.goto(first.origin+'/property-manager-login');await page.getByRole('status').filter({hasText:'DEMO SYSTEM'}).waitFor();
+    async function noDemoLabels(){assert.doesNotMatch(await page.locator('body').innerText(),/DEMO SYSTEM|Fictional Data|Class demonstration|Changes are temporary|\bDEMO-|\bDemo /i);}
+    await page.goto(first.origin+'/property-manager-login');await noDemoLabels();
     await page.locator('input[type=email]').fill(manager.email);await page.locator('input[type=password]').fill(manager.temporary_password);await page.getByRole('button',{name:'Log In',exact:true}).click();await page.waitForURL('**/property-manager-dashboard');
-    for(const route of ['tenant-management','apartment-management','bill-management','meter-device-management','qr-code-generator','reports']){await page.goto(first.origin+'/'+route);await page.waitForLoadState('networkidle');assert.equal(new URL(page.url()).pathname,'/'+route);}
+    for(const route of ['tenant-management','apartment-management','bill-management','meter-device-management','qr-code-generator','reports']){await page.goto(first.origin+'/'+route);await page.waitForLoadState('networkidle');assert.equal(new URL(page.url()).pathname,'/'+route);await noDemoLabels();}
     const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export PDF',exact:true}).click();assert.ok((await download).suggestedFilename().endsWith('.pdf'));
     await page.goto(first.origin+'/tenant-login');await page.locator('input[type=email]').fill(tenant.email);await page.locator('input[type=password]').fill(tenant.temporary_password);await page.getByRole('button',{name:'Log In',exact:true}).click();await page.waitForURL('**/tenant-dashboard');await page.waitForLoadState('networkidle');
+    await noDemoLabels();
     assert.equal(errors.length,0,'Browser errors: '+errors.join('; '));assert.equal(wrongOrigin.length,0,'Requests left the one-service origin');
-    console.log('[production-test] Compiled React: manager/tenant login, populated pages, banner, PDF export, CSP, and same-origin requests passed.');
+    console.log('[production-test] Compiled React: preferred account logins, populated pages without demo labels, PDF export, CSP, and same-origin requests passed.');
     await browser.close();browser=null;
     const issue=await request('POST','/api/qr-codes/create-tenant-token',{tenant_id:t.user.id},m.token);assert.equal((await request('POST','/api/qr-sessions',{qr_data:issue.token})).user.id,t.user.id);
     const {io}=require(require.resolve('socket.io-client',{paths:[path.join(root,'frontend')]}));
@@ -77,10 +86,21 @@ async function main(){
     try{await new Promise((resolve,reject)=>{socket.once('connect',resolve);socket.once('connect_error',reject);setTimeout(()=>reject(new Error('Socket timeout')),5000).unref();});}finally{socket.close();}
     console.log('[production-test] Signed QR login and authenticated same-service Socket.IO passed.');
     await request('POST','/api/apartments',{apartment_number:'DEMO-EPHEMERAL-TEST',rent_amount:5000},m.token,201);
-    const repeat=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repeat.status,0,repeat.stderr);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM apartments').get().n,21);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM bills').get().n,270);read.close();
+    const beforeHash=read.prepare('SELECT password FROM property_managers WHERE id=?').get(m.user.id).password;
+    const repeat=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repeat.status,0,repeat.stderr);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM apartments').get().n,21);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM bills').get().n,270);assert.equal(read.prepare('SELECT password FROM property_managers WHERE id=?').get(m.user.id).password,beforeHash);
     await stop(first.child);
+    // Simulate upgrading the previous hosted account identities in this isolated fixture.
+    const writer=new DatabaseSync(first.env.SQLITE_PATH);writer.prepare("UPDATE property_managers SET email='ams.demo.manager@example.com',password='unusable-old-fixture' WHERE id=?").run(m.user.id);writer.prepare("UPDATE tenants SET email='tenant01@example.com',password='unusable-old-fixture' WHERE id=?").run(t.user.id);writer.close();
+    const repair=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repair.status,0,repair.stderr);
+    assert.equal(read.prepare('SELECT COUNT(*) AS n FROM property_managers').get().n,1);assert.equal(read.prepare('SELECT COUNT(*) AS n FROM tenants').get().n,15);
+    const bcrypt=require('../backend/node_modules/bcryptjs');
+    for(const [table,profile,id] of [['property_managers',manager,m.user.id],['tenants',tenant,t.user.id]]){const row=read.prepare('SELECT * FROM '+table+' WHERE id=?').get(id);assert.equal(row.email,profile.email);assert.ok(bcrypt.compareSync(profile.temporary_password,row.password));}
+    const writer2=new DatabaseSync(first.env.SQLITE_PATH);writer2.prepare("UPDATE property_managers SET password='wrong-preferred-fixture' WHERE id=?").run(m.user.id);writer2.close();
+    const repairPreferred=spawnSync(process.execPath,[path.join(root,'backend/scripts/seed-demo.js')],{cwd:os.tmpdir(),env:first.env,encoding:'utf8',timeout:30000});assert.equal(repairPreferred.status,0,repairPreferred.stderr);assert.ok(bcrypt.compareSync(manager.temporary_password,read.prepare('SELECT password FROM property_managers WHERE id=?').get(m.user.id).password));assert.equal(read.prepare('SELECT COUNT(*) AS n FROM payment_history').get().n,224);read.close();
+    console.log('[production-test] Legacy hosted identities upgraded in place, preferred credentials repaired, and account IDs/billing history preserved without duplicates.');
     second=await instance('fresh-ephemeral-filesystem');
     const response=await fetch(second.origin+manager.login_route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:manager.email,password:manager.temporary_password})});assert.equal(response.status,200);
+    const tenantRestart=await fetch(second.origin+tenant.login_route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:tenant.email,password:tenant.temporary_password})});assert.equal(tenantRestart.status,200);
     const fresh=new DatabaseSync(second.env.SQLITE_PATH,{readOnly:true});assert.equal(fresh.prepare('SELECT COUNT(*) AS n FROM apartments').get().n,20);assert.equal(fresh.prepare("SELECT COUNT(*) AS n FROM apartments WHERE apartment_number='DEMO-EPHEMERAL-TEST'").get().n,0);fresh.close();
     console.log('[production-test] Repeated initialization adds no duplicates; a fresh filesystem restores the demo with stable credentials and discards temporary edits.');
     const unsafe={...first.env,SQLITE_PATH:path.join(root,'backend/data/ams.db')};const failure=spawnSync(process.execPath,[path.join(root,'scripts/start-production.js')],{env:unsafe,encoding:'utf8',timeout:10000});assert.notEqual(failure.status,0);assert.ok(failure.stderr.includes('temporary'));
