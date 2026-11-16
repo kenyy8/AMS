@@ -9,6 +9,8 @@
 //
 // LAN testing: start React dev server and open http://<your-local-ip>:3000 from your phone
 
+import axios from '../axiosConfig';
+
 export async function login(username, password) {
   if (!username || !password) {
     const err = new Error('username and password are required');
@@ -17,8 +19,7 @@ export async function login(username, password) {
   }
 
   try {
-    const resp = await axios.post('/api/login', { username, password });
-    console.log('login success', resp.data);
+    const resp = await axios.post('/api/property-managers/login', { email: username, password });
     return resp.data;
   } catch (error) {
     console.error('login error', error?.response?.data || error.message || error);

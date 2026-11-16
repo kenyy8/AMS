@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const adminController = require('../controllers/adminController');
+const adminController = require('../controllers/propertyManagerController');
 const { verifyToken, isAdmin } = require('../middleware/auth');
 
 router.post('/login', adminController.login);

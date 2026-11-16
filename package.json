@@ -1,0 +1,38 @@
+{
+  "name": "ams-local",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "check": "node scripts/check.js",
+    "setup": "node scripts/setup.js",
+    "db:check": "node backend/scripts/database.js check",
+    "db:init": "node backend/scripts/database.js init",
+    "db:bootstrap": "node backend/scripts/bootstrap-manager.js",
+    "test:security": "node --test backend/tests/security.test.js",
+    "test": "npm run test:security && npm --prefix frontend test -- --watchAll=false --runInBand",
+    "test:browser": "node scripts/browser-check.js",
+    "db:backup": "node backend/scripts/backup.js",
+    "seed:demo": "node backend/scripts/seed-demo.js",
+    "verify:demo": "node scripts/verify-demo.js",
+    "test:demo": "node --test backend/tests/demo-seed.test.js",
+    "build:production": "node scripts/build-production.js",
+    "render:build": "node scripts/render-build.js",
+    "start": "node --max-old-space-size=256 scripts/start-production.js",
+    "render:secrets": "node scripts/render-secrets.js",
+    "render:accounts": "node scripts/render-accounts.js",
+    "test:production": "node scripts/test-production.js",
+    "check:deploy": "node scripts/assert-deploy-safe.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "playwright": "^1.65.1",
+    "tree-kill": "^1.2.2"
+  },
+  "engines": {
+    "node": ">=24 <25"
+  }
+}

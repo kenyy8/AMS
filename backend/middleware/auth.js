@@ -13,11 +13,11 @@ exports.verifyToken = (req, res, next) => {
 
 exports.isAdmin = (req, res, next) => {
   // If the user has a valid id, treat as admin (since only admins exist now)
-  if (req.user && req.user.id) return next();
+  if (req.user && req.user.id && req.user.role === 'manager') return next();
   return res.status(403).json({ message: 'Admin access required' });
 };
 
 exports.isStudent = (req, res, next) => {
-  if (req.user && req.user.role === 'student') return next();
+  if (req.user && req.user.role === 'tenant') return next();
   return res.status(403).json({ message: 'Student access required' });
 };

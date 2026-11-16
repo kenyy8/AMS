@@ -5,9 +5,9 @@ const QRCode = require('qrcode');
 const db = require('../config/db');
 
 exports.login = async (req, res) => {
-  const { tenant_id } = req.body;
+  const { tenant_id, password } = req.body;
   const tenant = await Tenant.findByTenantId(tenant_id);
-  if (!tenant) return res.status(400).json({ message: 'Invalid tenant ID' });
+  if (!tenant || !require('../middleware/security').passwordMatches(password, tenant.password)) return res.status(401).json({ message: 'Invalid credentials' });
 
   const token = jwt.sign({ id: tenant.id, tenant_id: tenant.tenant_id, role: 'tenant' }, process.env.JWT_SECRET, { expiresIn: '1d' });
   res.json({ token, tenant });
@@ -16,7 +16,8 @@ exports.login = async (req, res) => {
 exports.create = async (req, res) => {
   try {
     const { name, email, phone, apartment_id, move_in_date } = req.body;
-    const id = await Tenant.create(name, email, phone, apartment_id, move_in_date || null);
+    if (!req.body.password) return res.status(400).json({ message: 'Password is required' });
+    const id = await Tenant.create(name, email, phone, apartment_id, move_in_date || null, await bcrypt.hash(req.body.password, 12));
     // fetch the created tenant row
     const [rows] = await db.query('SELECT t.*, a.apartment_number FROM tenants t LEFT JOIN apartments a ON t.apartment_id = a.id WHERE t.id = ?', [id]);
     const tenant = rows && rows[0] ? rows[0] : null;

@@ -38,10 +38,10 @@ const QRCodeGenerator = () => {
       const withPreviews = await Promise.all(list.map(async t => {
         try {
           const id = t.id || t.tenant_id || '';
-          const tokenPayload = { type: 'tenant_token', tenant_id: id, tenant_name: t.name || t.fullname || '', apartment: t.apartment_number || t.apartment || '' };
           // reuse cache if available
           if (qrCacheRef.current[id]) return { ...t, qr_preview: qrCacheRef.current[id] };
-          const qr = await QRCode.toDataURL(JSON.stringify(tokenPayload), { width: 140 });
+          const signed = await axios.get(`/api/qr-tokens/${id}`);
+          const qr = await QRCode.toDataURL(signed.data.token, { width: 140 });
           qrCacheRef.current[id] = qr;
           return { ...t, qr_preview: qr };
         } catch (e) {

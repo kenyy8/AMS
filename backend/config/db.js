@@ -1,27 +1,10 @@
-const mysql = require('mysql2/promise');
-require('dotenv').config();
-
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'smart_apartment_management',
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0
-});
-
-// Test the connection
-const testConnection = async () => {
-  try {
-    const connection = await pool.getConnection();
-    connection.release();
-  } catch (err) {
-    console.error('MySQL Connection Error:', err);
-  }
+const db = require('./sqlite');
+module.exports = {
+  ...db,
+  query: async (sql, params = []) => {
+    const statement = sql.replace(/NOW\(\)/gi, 'CURRENT_TIMESTAMP').replace(/CURDATE\(\)/gi, "date('now')").replace(/"([^"\n]*)"/g, "'$1'");
+    if (/^\s*(?:CREATE|ALTER|DROP|TRUNCATE)/i.test(statement)) throw new Error('Use versioned SQLite migrations for schema changes.');
+    return /^\s*(SELECT|WITH|PRAGMA)/i.test(statement) ? [db.all(statement, params)] : [db.run(statement, params)];
+  },
+  end: async () => {}
 };
-
-// Call the test connection function
-testConnection();
-
-module.exports = pool;

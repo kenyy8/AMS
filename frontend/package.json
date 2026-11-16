@@ -7,12 +7,11 @@
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^13.5.0",
-    "@yudiel/react-qr-scanner": "^2.3.1",
     "axios": "^1.9.0",
     "bootstrap": "^5.3.6",
     "chart.js": "^4.4.0",
     "html2canvas": "^1.4.1",
-    "jspdf": "^3.0.1",
+    "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.2",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.1",
@@ -29,12 +28,12 @@
     "cross-env": "^7.0.3"
   },
   "scripts": {
-    "start": "react-scripts start --no-source-maps",
+    "dev": "react-scripts start",
+    "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "fix-qr-sourcemaps": "node ./scripts/fix-qr-sourcemaps.js",
-    "postinstall": "node ./scripts/fix-qr-sourcemaps.js || true"
+    "fix-qr-sourcemaps": "node ./scripts/fix-qr-sourcemaps.js"
   },
   "eslintConfig": {
     "extends": [
@@ -56,5 +55,10 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
+  },
+  "jest": {
+    "moduleNameMapper": {
+      "^react-router/dom$": "<rootDir>/node_modules/react-router/dist/development/dom-export.js"
+    }
   }
 }

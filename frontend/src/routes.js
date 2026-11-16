@@ -32,7 +32,7 @@ const AppRoutes = () => (
     <Route path="/qr-code-generator" element={<RequireManager><QRCodeGenerator /></RequireManager>} />
     <Route path="/reports" element={<RequireManager><Reports /></RequireManager>} />
   <Route path="/qr-codes" element={<RequireManager><QRCodeGenerator /></RequireManager>} />
-  <Route path="/api-test" element={<ApiTest />} />
+  {process.env.NODE_ENV !== 'production' && <Route path="/api-test" element={<ApiTest />} />}
   </Route>
   </Routes>
 );

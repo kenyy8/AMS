@@ -73,7 +73,7 @@ const TenantDashboard = () => {
       socketRef.current = null;
     }
 
-    const socket = io('http://localhost:5001');
+    const socket = io(process.env.NODE_ENV === 'production' ? window.location.origin : axios.defaults.baseURL, { auth: { token: localStorage.getItem('token') } });
     socketRef.current = socket;
 
     socket.emit('join-apartment', apartmentId);

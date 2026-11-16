@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from '../../axiosConfig';
 import { useNavigate } from 'react-router-dom';
+import SafeScanner from '../Common/SafeScanner';
 // tenant quick-scan removed here to avoid showing empty admin modal
 
 const TenantLogin = () => {
@@ -11,8 +12,25 @@ const TenantLogin = () => {
   // scanner modal flag currently only toggled via setter; keep state for future modal wiring
   // eslint-disable-next-line no-unused-vars
   const [scannerModalOpen, setScannerModalOpen] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [qrPreview, setQrPreview] = useState(null); // holds tenant info from QR
   const navigate = useNavigate();
+  const loginFromScan = async result => {
+    const raw = result?.[0]?.rawValue;
+    if (!raw || scanning) return;
+    setScanning(true);
+    try {
+      const res = await axios.post('/api/qr-sessions', { qr_data: raw });
+      localStorage.removeItem('user');
+      localStorage.setItem('token', res.data.token);
+      localStorage.setItem('tenant', JSON.stringify(res.data.user));
+      setScannerModalOpen(false);
+      navigate('/tenant-dashboard');
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to read Smart ID');
+      setScannerModalOpen(false);
+    } finally { setScanning(false); }
+  };
 
   // quick scan modal removed to keep tenant login focused; use manual login instead
 
@@ -32,7 +50,7 @@ const TenantLogin = () => {
                 setError('');
                 try {
                   const res = await axios.post('/api/tenants/login', { email, password });
-                  console.log('Tenant login success', res.data);
+                  localStorage.removeItem('user');
                   if (res.data && res.data.token) {
                     localStorage.setItem('token', res.data.token);
                     localStorage.setItem('tenant', JSON.stringify(res.data.user));
@@ -41,7 +59,7 @@ const TenantLogin = () => {
                     setError('Login failed');
                   }
                 } catch (err) {
-                  console.error('Tenant login failed', err);
+                  if (process.env.NODE_ENV !== 'production') console.error('Tenant login failed');
                   setError(err.response?.data?.message || 'Login failed');
                 }
               }}>
@@ -123,7 +141,7 @@ const TenantLogin = () => {
             {/* inline scanner removed: scanner opens as full-screen modal */}
           </div>
 
-                {/* Quick scan modal removed */}
+                {scannerModalOpen && <div role="dialog" aria-label="Scan Smart ID" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', zIndex: 3000, padding: 24 }}><div style={{ maxWidth: 420, margin: 'auto', background: '#fff', padding: 16 }}><h3>Scan Smart ID</h3><SafeScanner onScan={loginFromScan} onError={() => setError('Allow camera access to scan your Smart ID.')} /><button className="btn btn-secondary" onClick={() => setScannerModalOpen(false)}>Close</button></div></div>}
         </div>
       </div>
     </div>
